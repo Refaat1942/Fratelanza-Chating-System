@@ -21,10 +21,10 @@ under `/api/` (including the WebSocket upgrade for Socket.io) to
 `lotus_api:8080`. The API talks to Postgres on the internal
 `lotus_net` Docker network.
 
-There are **no external webhooks, no third-party APIs, and no
-Replit-runtime dependencies**. WhatsApp / Messenger / Instagram are
-referenced in the UI as channel labels only — there is no live
-integration with Meta yet.
+There are **no Replit-runtime dependencies**. WhatsApp is integrated through
+the Meta WhatsApp Cloud API (inbound webhook + outbound send) — see
+`deploy/WHATSAPP_SETUP.md`. Messenger / Instagram are channel labels plus a
+secret-protected generic JSON hook.
 
 ---
 

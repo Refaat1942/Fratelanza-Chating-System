@@ -100,6 +100,24 @@ export async function bootstrapSeed(): Promise<void> {
       process.env["RUN_SEED"] === "true";
     const forceReseed = process.env["FORCE_RESEED"] === "true";
     if (isProd && !demoOptIn && !forceReseed) {
+      // First-run admin for a clean production database (no demo data): set
+      // ADMIN_EMAIL + ADMIN_PASSWORD once; ignored when any user exists.
+      const adminEmail = process.env["ADMIN_EMAIL"]?.trim();
+      const adminPassword = process.env["ADMIN_PASSWORD"];
+      if (adminEmail && adminPassword) {
+        const [{ count: existing }] = await db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(usersTable);
+        if (existing === 0) {
+          await db.insert(usersTable).values({
+            email: adminEmail,
+            name: process.env["ADMIN_NAME"]?.trim() || "Administrator",
+            role: "admin",
+            passwordHash: await bcrypt.hash(adminPassword, 10),
+          });
+          logger.warn({ adminEmail }, "bootstrap-seed: created initial admin user");
+        }
+      }
       logger.info(
         "bootstrap-seed: skipping demo seed in production (set SEED_DEMO_DATA=true or RUN_SEED=true to override)",
       );
