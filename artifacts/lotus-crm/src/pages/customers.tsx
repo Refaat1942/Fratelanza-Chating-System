@@ -85,9 +85,9 @@ export default function CustomersPage() {
     <div className="flex-1 space-y-6 p-8 overflow-y-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Patient Directory</h2>
+          <h2 className="text-3xl font-bold tracking-tight">Customers</h2>
           <p className="text-muted-foreground">
-            Manage and view patient histories across all branches.
+            Manage and view customer histories across all branches.
           </p>
         </div>
         <CreateCustomerDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
@@ -120,7 +120,7 @@ export default function CustomersPage() {
         <Table>
           <TableHeader className="bg-muted/50">
             <TableRow>
-              <TableHead>Patient</TableHead>
+              <TableHead>Customer</TableHead>
               <TableHead>Contact</TableHead>
               <TableHead>Branch</TableHead>
               <TableHead>Address</TableHead>
@@ -152,7 +152,7 @@ export default function CustomersPage() {
                   <TableRow>
                     <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                       <User className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                      No patients found matching your criteria.
+                      No customers found matching your criteria.
                     </TableCell>
                   </TableRow>
                 )
@@ -609,7 +609,7 @@ function CreateCustomerDialog({
       },
       {
         onSuccess: () => {
-          toast({ title: "Patient profile created successfully" });
+          toast({ title: "Customer profile created successfully" });
           queryClient.invalidateQueries({ queryKey: getListCustomersQueryKey() });
           form.reset();
           onOpenChange(false);
@@ -626,14 +626,14 @@ function CreateCustomerDialog({
       <DialogTrigger asChild>
         <Button data-testid="btn-create-customer">
           <Plus className="h-4 w-4 mr-2" />
-          Add Patient
+          Add customer
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[550px]">
         <DialogHeader>
-          <DialogTitle>Create Patient Profile</DialogTitle>
+          <DialogTitle>Create customer profile</DialogTitle>
           <DialogDescription>
-            Add a new patient to the CRM. This allows agents to attach clinical notes to their profile.
+            Add a new customer so agents can keep notes on their profile.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>

@@ -4,16 +4,31 @@ import { io, Socket } from "socket.io-client";
 let sharedSocket: Socket | null = null;
 
 function getSocket(): Socket {
-  if (!sharedSocket || !sharedSocket.connected) {
+  // One long-lived socket: socket.io reconnects by itself. (Re-creating it
+  // whenever it was momentarily disconnected leaked sockets and delivered
+  // every event several times.)
+  if (!sharedSocket) {
     sharedSocket = io({
       path: "/api/socket.io",
-      auth: {
-        token: localStorage.getItem("lotus_token"),
-      },
+      auth: (cb) => cb({ token: localStorage.getItem("lotus_token") }),
       transports: ["websocket", "polling"],
+      reconnectionDelayMax: 10_000,
     });
   }
   return sharedSocket;
+}
+
+/** Drop the socket on login/logout so a new user never inherits the old session. */
+export function resetSocket(): void {
+  if (sharedSocket) {
+    sharedSocket.removeAllListeners();
+    sharedSocket.disconnect();
+    sharedSocket = null;
+  }
+}
+
+export function getSharedSocket(): Socket {
+  return getSocket();
 }
 
 export function useSocket() {

@@ -1,155 +1,26 @@
+@import "./theme.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* Fratelanza Chat Management System — cyberpunk theme */
-:root {
-  --button-outline: rgba(0, 255, 255, 0.15);
-  --badge-outline: rgba(255, 215, 0, 0.1);
-  --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(0, 255, 255, 0.05);
-  --elevate-2: rgba(0, 255, 255, 0.1);
-
-  /* White background with cyan/gold accents */
-  --background: 0 0% 98%; /* off-white background */
-  --foreground: 220 15% 20%; /* dark text */
-  --border: 190 70% 45%; /* cyan border */
-
-  --card: 0 0% 100%; /* pure white cards */
-  --card-foreground: 220 15% 20%;
-  --card-border: 190 70% 42%;
-
-  --sidebar: 0 0% 100%;
-  --sidebar-foreground: 220 15% 20%;
-  --sidebar-border: 190 70% 42%;
-  --sidebar-primary: 190 80% 50%; /* bright cyan */
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 45 95% 50%; /* vibrant gold/yellow */
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 190 80% 50%;
-
-  --popover: 0 0% 100%;
-  --popover-foreground: 220 15% 20%;
-  --popover-border: 190 70% 45%;
-
-  /* Brand colors — Cyan primary, Gold accent on light background */
-  --primary: 190 80% 50%; /* bright cyan */
-  --primary-foreground: 0 0% 100%;
-
-  --secondary: 45 95% 50%; /* vibrant gold */
-  --secondary-foreground: 0 0% 100%;
-
-  --muted: 220 10% 60%;
-  --muted-foreground: 220 15% 35%;
-
-  --accent: 45 95% 50%; /* gold accent */
-  --accent-foreground: 0 0% 100%;
-  
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 100%;
-
-  --input: 0 0% 100%;
-  --ring: 190 80% 50%;
-
-  /* Charts — vibrant cyberpunk palette */
-  --chart-1: 190 80% 50%; /* Cyan */
-  --chart-2: 45 95% 50%; /* Gold */
-  --chart-3: 200 85% 55%; /* Blue */
-  --chart-4: 0 84% 60%;  /* Red */
-  --chart-5: 280 95% 65%; /* Purple */
-
-  --app-font-sans: 'Inter', sans-serif;
-  --app-font-serif: Georgia, serif;
-  --app-font-mono: Menlo, monospace;
-  --radius: 0.5rem;
-  
-  /* Clean light theme shadows - subtle, no glow */
-  --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.05);
-  --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.08);
-  --shadow-sm: 0px 2px 4px 0px rgba(0, 0, 0, 0.08);
-  --shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.1), 0px 2px 4px -1px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0px 6px 10px -1px rgba(0, 0, 0, 0.1), 0px 2px 4px -1px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0px 10px 15px -3px rgba(0, 0, 0, 0.12), 0px 4px 6px -2px rgba(0, 0, 0, 0.06);
-  --shadow-xl: 0px 20px 25px -5px rgba(0, 0, 0, 0.15), 0px 10px 10px -5px rgba(0, 0, 0, 0.08);
-  --shadow-2xl: 0px 25px 50px -12px rgba(0, 0, 0, 0.18);
-  
-  --tracking-normal: 0em;
-  --spacing: 0.25rem;
-
-  --sidebar-primary-border: hsl(190 80% calc(50% + var(--opaque-button-border-intensity)));
-  --sidebar-accent-border: hsl(45 95% calc(50% + var(--opaque-button-border-intensity)));
-  --primary-border: hsl(190 80% calc(50% + var(--opaque-button-border-intensity)));
-  --secondary-border: hsl(45 95% calc(50% + var(--opaque-button-border-intensity)));
-  --muted-border: hsl(220 10% calc(60% + var(--opaque-button-border-intensity)));
-  --accent-border: hsl(45 95% calc(50% + var(--opaque-button-border-intensity)));
-  --destructive-border: hsl(0 84% calc(60% + var(--opaque-button-border-intensity)));
-}
-
-/* Light theme with cyberpunk accents */
-.dark, :root {
-  --button-outline: rgba(0, 153, 255, 0.1);
-  --badge-outline: rgba(255, 215, 0, 0.1);
-  --opaque-button-border-intensity: -8;
-  --elevate-1: rgba(0, 153, 255, 0.05);
-  --elevate-2: rgba(0, 153, 255, 0.08);
-
-  /* Backgrounds — clean light theme */
-  --background: 0 0% 98%;
-  --foreground: 220 15% 20%;
-  --border: 190 70% 45%;
-
-  --card: 0 0% 100%;
-  --card-foreground: 220 15% 20%;
-  --card-border: 190 70% 42%;
-
-  --sidebar: 0 0% 100%;
-  --sidebar-foreground: 220 15% 20%;
-  --sidebar-border: 190 70% 42%;
-  --sidebar-primary: 190 80% 50%; /* bright cyan */
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 45 95% 50%; /* vibrant gold */
-  --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 190 80% 50%;
-
-  --popover: 0 0% 100%;
-  --popover-foreground: 220 15% 20%;
-  --popover-border: 190 70% 45%;
-
-  /* Brand — Cyan primary, Gold accent */
-  --primary: 190 80% 50%;
-  --primary-foreground: 0 0% 100%;
-
-  --secondary: 45 95% 50%;
-  --secondary-foreground: 0 0% 100%;
-
-  --muted: 220 10% 60%;
-  --muted-foreground: 220 15% 35%;
-
-  --accent: 45 95% 50%;
-  --accent-foreground: 0 0% 100%;
-
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 100%;
-
-  --input: 0 0% 100%;
-  --ring: 190 80% 50%;
-
-  --chart-1: 190 80% 50%;
-  --chart-2: 45 95% 50%;
-  --chart-3: 200 85% 55%;
-  --chart-4: 0 84% 60%;
-  --chart-5: 280 95% 65%;
-}
 
 @layer base {
   * {
     border-color: hsl(var(--border));
   }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     font-family: var(--app-font-sans);
     -webkit-font-smoothing: antialiased;
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+    overscroll-behavior-y: none;
+  }
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
 }
 @layer utilities {
@@ -185,26 +56,12 @@
   .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after { inset: -1px; }
   
-  /* Cyberpunk glow effects */
-  .glow-primary {
-    box-shadow: 0 0 20px rgba(0, 255, 255, 0.3), 0 0 40px rgba(0, 255, 255, 0.15);
-    border-color: hsl(var(--primary)) !important;
-  }
-  .glow-accent {
-    box-shadow: 0 0 20px rgba(255, 215, 0, 0.3), 0 0 40px rgba(255, 215, 0, 0.15);
-    border-color: hsl(var(--accent)) !important;
-  }
-  .neon-border {
-    border: 1px solid hsl(var(--primary));
-    box-shadow: inset 0 0 10px rgba(0, 255, 255, 0.1), 0 0 20px rgba(0, 255, 255, 0.2);
-  }
-  .neon-text {
-    color: hsl(var(--primary));
-    text-shadow: 0 0 10px rgba(0, 255, 255, 0.6), 0 0 20px rgba(0, 255, 255, 0.3);
-  }
-  .neon-text-accent {
-    color: hsl(var(--accent));
-    text-shadow: 0 0 10px rgba(255, 215, 0, 0.6), 0 0 20px rgba(255, 215, 0, 0.3);
-  }
 }
 
+/* Safe-area + dynamic viewport helpers for the installed/mobile app */
+.h-app { height: 100vh; height: 100dvh; }
+.min-h-app { min-height: 100vh; min-height: 100dvh; }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }

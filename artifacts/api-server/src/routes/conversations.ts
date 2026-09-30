@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { conversationsTable, customersTable, usersTable } from "@workspace/db";
-import { eq, and, ilike, desc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, ilike, desc, sql } from "drizzle-orm";
 import { requireAuth, AuthRequest } from "../middlewares/auth";
 import { requirePermission } from "../middlewares/permissions";
 import { tryAutoAssign, drainQueue } from "../lib/assignment";
@@ -96,7 +96,11 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
   if (search) conditions.push(ilike(customersTable.name, `%${search}%`));
   if (tag) conditions.push(sql<boolean>`${tag} = ANY(${conversationsTable.tags})`);
   if (req.user?.role === "agent") {
-    conditions.push(eq(conversationsTable.assignedAgentId, req.user.id));
+    // Own chats + the unassigned queue (agents must be able to see a queued
+    // chat in order to claim it).
+    conditions.push(
+      or(eq(conversationsTable.assignedAgentId, req.user.id), isNull(conversationsTable.assignedAgentId))!,
+    );
   }
 
   const rows = await baseQuery
@@ -104,6 +108,43 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
     .orderBy(desc(conversationsTable.lastMessageAt));
 
   res.json(rows);
+});
+
+// Cheap change-detector for polling: one aggregate row describing the inbox the
+// caller can see. The client only re-fetches the full list when `version` moves.
+router.get("/inbox/sync", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
+  const scope =
+    req.user?.role === "agent"
+      ? sql`WHERE assigned_agent_id = ${req.user.id} OR assigned_agent_id IS NULL`
+      : sql``;
+  const result = await db.execute(sql`
+    SELECT
+      COUNT(*)::int AS total,
+      COALESCE(SUM(unread_count), 0)::int AS unread,
+      COALESCE(SUM(hashtext(
+        id::text || ':' || status || ':' || COALESCE(assigned_agent_id::text, '-') || ':' ||
+        unread_count::text || ':' || COALESCE(extract(epoch FROM last_message_at)::text, '-')
+      )::bigint), 0)::text AS version
+    FROM conversations ${scope}
+  `);
+  const row = (result.rows ?? result)[0] as { total: number; unread: number; version: string };
+  res.set("Cache-Control", "no-store");
+  res.json({ total: row.total, unread: row.unread, version: row.version });
+});
+
+// Mark a conversation as read (clears the unread badge).
+router.post("/conversations/:id/read", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const existing = await getConversationWithRelations(id);
+  if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+  if (req.user?.role === "agent" && existing.assignedAgentId !== req.user.id) {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+  if (existing.unreadCount > 0) {
+    await db.update(conversationsTable).set({ unreadCount: 0 }).where(eq(conversationsTable.id, id));
+  }
+  res.json({ ok: true });
 });
 
 router.post("/conversations", requireAuth, requirePermission("canSendMessages"), async (req, res) => {
@@ -127,8 +168,8 @@ router.get("/conversations/:id", requireAuth, requirePermission("canViewChats"),
   const id = Number(req.params.id);
   const conv = await getConversationWithRelations(id);
   if (!conv) { res.status(404).json({ error: "Not found" }); return; }
-  // Agents can only view their own assigned conversations
-  if (req.user?.role === "agent" && conv.assignedAgentId !== req.user.id) {
+  // Agents can view their own chats and unassigned ones (to claim them)
+  if (req.user?.role === "agent" && conv.assignedAgentId !== null && conv.assignedAgentId !== req.user.id) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -219,7 +260,10 @@ router.post("/conversations/:id/assign", requireAuth, requirePermission("canSend
   const full = await getConversationWithRelations(id);
 
   const io = req.app.get("io") as IOServer | undefined;
-  if (io) io.to(`conv:${id}`).emit("agent_assigned", { conversationId: id, agentId });
+  if (io) {
+    io.to(`conv:${id}`).emit("agent_assigned", { conversationId: id, agentId });
+    io.emit("conversation_updated", { conversationId: id });
+  }
 
   res.json(full);
 });

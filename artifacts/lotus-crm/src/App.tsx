@@ -8,9 +8,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useMyPermissions, type EffectivePermissions } from "@/lib/api-extra";
 import { AppLayout } from "@/components/layout";
+import { BrandProvider } from "@/components/brand-provider";
+import { PageLoader } from "@/components/states";
 
 // Pages
 import LoginPage from "@/pages/login";
+import ResetPasswordPage from "@/pages/reset-password";
+import ChangePasswordPage from "@/pages/change-password";
 import DashboardPage from "@/pages/dashboard";
 import ChatPage from "@/pages/chat";
 import CustomersPage from "@/pages/customers";
@@ -25,105 +29,68 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
-    }
-  }
+    },
+  },
 });
 
 type PageComponent = React.ComponentType<Record<string, never>>;
 
-interface RouteProps {
-  component: PageComponent;
-}
-
-// Protected Route Component
-const ProtectedRoute = ({ component: Component }: RouteProps) => {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <div className="h-screen w-full flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>;
-  }
-
-  if (!user) {
-    return <Redirect to="/login" />;
-  }
-
-  return (
-    <AppLayout>
-      <Component />
-    </AppLayout>
-  );
-};
-
-// Admin Route Component
-const AdminRoute = ({ component: Component }: RouteProps) => {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <div className="h-screen w-full flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>;
-  }
-
-  if (!user) {
-    return <Redirect to="/login" />;
-  }
-
-  if (user.role !== "admin") {
-    return <Redirect to="/dashboard" />;
-  }
-
-  return (
-    <AppLayout>
-      <Component />
-    </AppLayout>
-  );
-};
-
-// Permission-gated route
-const PermissionRoute = ({
+function Guard({
   component: Component,
   permission,
+  admin,
   fallback = "/dashboard",
-}: RouteProps & { permission: keyof EffectivePermissions; fallback?: string }) => {
-  const { user, isLoading } = useAuth();
-  const { data: perms, isLoading: permsLoading } = useMyPermissions();
-
-  if (isLoading || permsLoading) {
-    return <div className="h-screen w-full flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>;
+}: {
+  component: PageComponent;
+  permission?: keyof EffectivePermissions;
+  admin?: boolean;
+  fallback?: string;
+}) {
+  const { user } = useAuth();
+  const { data: perms, isLoading } = useMyPermissions();
+  if (admin && user?.role !== "admin") return <Redirect to={fallback} />;
+  if (permission) {
+    if (isLoading) return <PageLoader />;
+    if (!perms?.[permission]) return <Redirect to={fallback} />;
   }
+  return <Component />;
+}
 
+/** Everything behind login. The layout is mounted ONCE, not per page. */
+function ProtectedApp() {
+  const { user, isLoading } = useAuth();
+  if (isLoading) return <PageLoader fullScreen />;
   if (!user) return <Redirect to="/login" />;
-  if (!perms?.[permission]) return <Redirect to={fallback} />;
+  if (user.mustChangePassword) return <Redirect to="/change-password" />;
 
   return (
     <AppLayout>
-      <Component />
+      <Switch>
+        <Route path="/dashboard">{() => <Guard component={DashboardPage} />}</Route>
+        <Route path="/chat">{() => <Guard component={ChatPage} permission="canViewChats" />}</Route>
+        <Route path="/customers">{() => <Guard component={CustomersPage} permission="canManageCustomers" />}</Route>
+        <Route path="/reports">{() => <Guard component={ReportsPage} permission="canViewReports" />}</Route>
+        <Route path="/insights">{() => <Guard component={InsightsPage} permission="canViewChats" />}</Route>
+        <Route path="/marketing">{() => <Guard component={MarketingPage} admin />}</Route>
+        <Route path="/settings">{() => <Guard component={SettingsPage} admin />}</Route>
+        <Route component={NotFound} />
+      </Switch>
     </AppLayout>
   );
-};
+}
 
 function Router() {
-  const { user } = useAuth();
-
+  const { user, isLoading } = useAuth();
   return (
     <Switch>
       <Route path="/login" component={LoginPage} />
-
-      {/* Root redirect */}
+      <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/change-password" component={ChangePasswordPage} />
+      {/* The Inbox is the landing screen after sign-in */}
       <Route path="/">
-        {() => <Redirect to={user ? "/dashboard" : "/login"} />}
+        {() => (isLoading ? <PageLoader fullScreen /> : <Redirect to={user ? "/chat" : "/login"} />)}
       </Route>
-
-      {/* Protected Routes */}
-      <Route path="/dashboard">{() => <ProtectedRoute component={DashboardPage} />}</Route>
-      <Route path="/chat">{() => <PermissionRoute component={ChatPage} permission="canViewChats" />}</Route>
-      <Route path="/customers">{() => <PermissionRoute component={CustomersPage} permission="canManageCustomers" fallback="/dashboard" />}</Route>
-      <Route path="/reports">{() => <PermissionRoute component={ReportsPage} permission="canViewReports" />}</Route>
-      <Route path="/insights">{() => <PermissionRoute component={InsightsPage} permission="canViewChats" />}</Route>
-      <Route path="/marketing">{() => <AdminRoute component={MarketingPage} />}</Route>
-
-      {/* Admin Route */}
-      <Route path="/settings">{() => <AdminRoute component={SettingsPage} />}</Route>
-
-      <Route component={NotFound} />
+      <Route component={ProtectedApp} />
     </Switch>
   );
 }
@@ -137,13 +104,15 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} storageKey="fratelanza-theme">
         <TooltipProvider>
           <AuthProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <Router />
-            </WouterRouter>
-            <Toaster />
+            <BrandProvider>
+              <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+                <Router />
+              </WouterRouter>
+              <Toaster />
+            </BrandProvider>
           </AuthProvider>
         </TooltipProvider>
       </ThemeProvider>

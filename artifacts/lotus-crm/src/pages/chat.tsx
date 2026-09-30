@@ -1,22 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { 
-  useListConversations, 
-  useGetConversation, 
-  useListMessages, 
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  useListConversations,
+  useGetConversation,
   useSendMessage,
-  useAssignConversation,
   useResolveConversation,
   usePatchConversation,
+  useAssignConversation,
   useListUsers,
   useListTags,
   useListQuickReplies,
-  useGetMe,
-  getListMessagesQueryKey,
   getListConversationsQueryKey,
-  getGetConversationQueryKey
+  getGetConversationQueryKey,
 } from "@workspace/api-client-react";
+import type { Message, Conversation } from "@workspace/api-client-react";
 import { useConversationSocket, useTypingEmit, useTypingIndicator } from "@/hooks/use-socket";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Search,
@@ -27,11 +25,19 @@ import {
   Phone,
   MapPin,
   Tag as TagIcon,
-  MessageSquarePlus,
   MessageSquare,
   X,
   Plus,
-  ChevronDown
+  ChevronDown,
+  ChevronLeft,
+  PanelRight,
+  Check,
+  CheckCheck,
+  AlertCircle,
+  ArrowDown,
+  RotateCcw,
+  Loader2,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,67 +61,96 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { FaWhatsapp, FaFacebookMessenger, FaInstagram, FaSms } from "react-icons/fa";
-import { Globe } from "lucide-react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions } from "@/lib/api-extra";
+import { useThread, markConversationRead } from "@/lib/inbox";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { EmptyState, ErrorState } from "@/components/states";
+import { initials, userLabel, type AppUser } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import { useGetMe } from "@workspace/api-client-react";
 
-type ConvWithChannel = {
-  id: number;
+type Conv = Conversation & {
   channel?: string;
   lastSenderType?: "agent" | "customer" | "system" | null;
-  lastMessageAt?: string | null;
-  status: string;
 };
 
-function getChatStatus(
-  conv: ConvWithChannel,
-  slaMinutes: number,
-): { label: "Waiting" | "Late" | "Replied" | "Completed" | "Pending"; tone: string } {
-  if (conv.status === "completed")
-    return { label: "Completed", tone: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" };
-  if (conv.status === "pending")
-    return { label: "Pending", tone: "bg-slate-500/10 text-slate-600 border-slate-500/20" };
+type StatusFilter = "active" | "open" | "pending" | "completed" | "all";
+const PAGE = 60;
+const CHANNEL_NAMES: Record<string, string> = { all: "All", whatsapp: "WhatsApp", messenger: "Messenger", instagram: "Instagram", sms: "SMS", web: "Web chat" };
+
+/* ----------------------------------------------------------------- helpers */
+
+function chatTone(conv: Conv, slaMinutes: number): { label: string; tone: string } | null {
+  if (conv.status === "completed") return { label: "Completed", tone: "bg-success/10 text-success border-success/30" };
+  if (!conv.assignedAgentId) return { label: "Queue", tone: "bg-warning/10 text-warning border-warning/30" };
   if (conv.lastSenderType === "customer") {
-    const ageMin = conv.lastMessageAt
-      ? Math.max(0, (Date.now() - new Date(conv.lastMessageAt).getTime()) / 60000)
-      : 0;
-    if (ageMin >= slaMinutes)
-      return { label: "Late", tone: "bg-rose-500/10 text-rose-600 border-rose-500/20 animate-pulse" };
-    return { label: "Waiting", tone: "bg-amber-500/10 text-amber-600 border-amber-500/20" };
+    const ageMin = conv.lastMessageAt ? Math.max(0, (Date.now() - new Date(conv.lastMessageAt).getTime()) / 60000) : 0;
+    return ageMin >= slaMinutes
+      ? { label: "Late", tone: "bg-destructive/10 text-destructive border-destructive/30" }
+      : { label: "Waiting", tone: "bg-warning/10 text-warning border-warning/30" };
   }
-  return { label: "Replied", tone: "bg-blue-500/10 text-blue-600 border-blue-500/20" };
+  if (conv.status === "pending") return { label: "Replied", tone: "bg-info/10 text-info border-info/30" };
+  return null;
 }
 
-function ChannelGlyph({ channel }: { channel?: string }) {
+function ChannelGlyph({ channel, className }: { channel?: string; className?: string }) {
   const c = (channel ?? "whatsapp").toLowerCase();
-  if (c === "messenger") return <FaFacebookMessenger className="h-3.5 w-3.5 text-blue-500" />;
-  if (c === "instagram") return <FaInstagram className="h-3.5 w-3.5 text-pink-500" />;
-  if (c === "sms") return <FaSms className="h-3.5 w-3.5 text-slate-500" />;
-  if (c === "web") return <Globe className="h-3.5 w-3.5 text-purple-500" />;
-  return <FaWhatsapp className="h-3.5 w-3.5 text-emerald-500" />;
+  const cls = cn("h-3.5 w-3.5 shrink-0", className);
+  if (c === "messenger") return <FaFacebookMessenger className={cn(cls, "text-[#0084FF]")} aria-label="Messenger" />;
+  if (c === "instagram") return <FaInstagram className={cn(cls, "text-[#E4405F]")} aria-label="Instagram" />;
+  if (c === "sms") return <FaSms className={cn(cls, "text-muted-foreground")} aria-label="SMS" />;
+  if (c === "web") return <Globe className={cn(cls, "text-info")} aria-label="Web chat" />;
+  return <FaWhatsapp className={cn(cls, "text-[#25D366]")} aria-label="WhatsApp" />;
 }
+
+function listTime(iso?: string | null): string {
+  if (!iso) return "";
+  const d = parseISO(iso);
+  if (isToday(d)) return format(d, "h:mm a");
+  if (isYesterday(d)) return "Yesterday";
+  return format(d, "d MMM");
+}
+
+function dayLabel(d: Date): string {
+  if (isToday(d)) return "Today";
+  if (isYesterday(d)) return "Yesterday";
+  return format(d, "EEEE, d MMMM yyyy");
+}
+
+function customerTitle(c: { customer?: { name?: string | null; phone?: string | null } | null }): string {
+  return c.customer?.name?.trim() || c.customer?.phone || "Unknown";
+}
+
+/* -------------------------------------------------------------------- page */
 
 export default function ChatPage() {
-  const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "completed" | "pending">("open");
-  const [message, setMessage] = useState("");
-  const { data: user } = useGetMe();
-
-  // ?channel=whatsapp|messenger|... — set from sidebar links.
-  // ?conv=NNN — deep-link from AI Insights page to open a specific chat.
+  const [location, navigate] = useLocation();
   const searchString = useSearch();
-  const channelFilter = React.useMemo(() => {
-    const v = new URLSearchParams(searchString).get("channel");
-    return v && ["whatsapp", "messenger", "instagram", "sms", "web"].includes(v) ? v : null;
-  }, [searchString]);
-  useEffect(() => {
+  const { data: me } = useGetMe();
+  const { toast } = useToast();
+
+  const selectedConvId = useMemo(() => {
     const id = new URLSearchParams(searchString).get("conv");
-    if (id && /^\d+$/.test(id)) setSelectedConvId(Number(id));
+    return id && /^\d+$/.test(id) ? Number(id) : null;
   }, [searchString]);
+
+  const selectConv = useCallback(
+    (id: number | null) => navigate(id ? `/chat?conv=${id}` : "/chat"),
+    [navigate],
+  );
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [visible, setVisible] = useState(PAGE);
+  const [message, setMessage] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const wideDetails = useMediaQuery("(min-width: 1280px)");
 
   const { data: insights } = useInsights();
   const slaMinutes = insights?.slaMinutes ?? 15;
@@ -125,44 +160,65 @@ export default function ChatPage() {
       const trimmed = (prev ?? "").trim();
       return trimmed.length ? `${trimmed}\n${text}` : text;
     });
+    setDetailsOpen(false);
   }, []);
 
-  const { data: convsRaw, isLoading: convLoading } = useListConversations({
-    status: statusFilter === "all" ? undefined : statusFilter,
-    search: search || undefined
+  // Whole list is fetched once; filtering/sorting is client-side. Live updates
+  // come from useInboxSync (AppLayout) invalidating this query on change only.
+  const { data: convsRaw, isLoading, isError, refetch } = useListConversations(undefined, {
+    query: { queryKey: getListConversationsQueryKey(), staleTime: 15_000 },
   });
 
-  // Channel filter is applied client-side: API list endpoint already returns
-  // `channel` for every row (added to the select), so we filter here without
-  // a round-trip and keep React Query's cache key stable.
-  const conversations = React.useMemo(() => {
-    if (!convsRaw) return convsRaw;
-    if (!channelFilter) return convsRaw;
-    return convsRaw.filter(
-      (c) => ((c as unknown as { channel?: string }).channel ?? "whatsapp") === channelFilter,
-    );
-  }, [convsRaw, channelFilter]);
+  const channels = useMemo(() => {
+    const set = new Set<string>();
+    (convsRaw as Conv[] | undefined)?.forEach((c) => set.add(c.channel ?? "whatsapp"));
+    return [...set];
+  }, [convsRaw]);
+
+  const conversations = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const rows = ((convsRaw as Conv[] | undefined) ?? []).filter((c) => {
+      if (statusFilter === "active" && c.status === "completed") return false;
+      if (statusFilter !== "active" && statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (channelFilter !== "all" && (c.channel ?? "whatsapp") !== channelFilter) return false;
+      if (!q) return true;
+      return (
+        (c.customer?.name ?? "").toLowerCase().includes(q) ||
+        (c.customer?.phone ?? "").toLowerCase().includes(q) ||
+        (c.lastMessage ?? "").toLowerCase().includes(q)
+      );
+    });
+    // Latest activity first — new messages float to the top automatically.
+    return rows.sort((a, b) => {
+      const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return tb - ta || b.id - a.id;
+    });
+  }, [convsRaw, search, statusFilter, channelFilter]);
+
+  useEffect(() => setVisible(PAGE), [search, statusFilter, channelFilter]);
+
+  const showList = !selectedConvId; // on phones: list OR conversation
 
   return (
-    <div className="flex h-full w-full bg-background overflow-hidden">
-      {/* Left Sidebar - Conversation List */}
-      <div className="w-80 flex-shrink-0 border-r border-border flex flex-col bg-sidebar">
-        <div className="p-4 border-b border-border flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-lg tracking-tight flex items-center gap-2">
-              Inbox
-              {channelFilter && (
-                <Badge variant="outline" className="text-[10px] capitalize gap-1 font-normal">
-                  <ChannelGlyph channel={channelFilter} />
-                  {channelFilter}
-                </Badge>
-              )}
-            </h2>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-              <SelectTrigger className="w-[110px] h-8 text-xs bg-background">
-                <SelectValue placeholder="Status" />
+    <div className="flex h-full w-full min-h-0 bg-background overflow-hidden">
+      {/* -------- Conversation list -------- */}
+      <aside
+        className={cn(
+          "flex-col min-h-0 w-full md:w-[340px] lg:w-[380px] md:flex-shrink-0 md:border-r border-border bg-card",
+          showList ? "flex" : "hidden md:flex",
+        )}
+        aria-label="Conversations"
+      >
+        <div className="p-3 sm:p-4 border-b border-border space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-lg tracking-tight">Inbox</h2>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+              <SelectTrigger className="w-[130px] h-9 text-xs" aria-label="Filter by status">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="open">Open</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="completed">Completed</SelectItem>
@@ -171,24 +227,44 @@ export default function ChatPage() {
             </Select>
           </div>
           <div className="relative">
-            <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" aria-hidden />
             <Input
               type="search"
-              placeholder="Search patients..."
-              className="pl-8 bg-background"
+              placeholder="Search name, phone or message"
+              aria-label="Search conversations"
+              className="pl-9 h-10"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               data-testid="input-chat-search"
             />
           </div>
+          {channels.length > 1 && (
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label="Channel">
+              {["all", ...channels].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setChannelFilter(c)}
+                  aria-pressed={channelFilter === c}
+                  className={cn(
+                    "h-8 px-3 rounded-full text-xs font-medium border flex items-center gap-1.5 whitespace-nowrap",
+                    channelFilter === c ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-muted",
+                  )}
+                >
+                  {c !== "all" && <ChannelGlyph channel={c} className="h-3 w-3" />}
+                  <span>{CHANNEL_NAMES[c] ?? c}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        <ScrollArea className="flex-1">
-          {convLoading ? (
-            <div className="p-4 space-y-4">
-              {[1, 2, 3, 4, 5].map((i) => (
+        <ScrollArea className="flex-1 min-h-0">
+          {isLoading ? (
+            <div className="p-4 space-y-4" aria-busy>
+              {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div key={i} className="flex gap-3">
-                  <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
+                  <Skeleton className="h-11 w-11 rounded-full flex-shrink-0" />
                   <div className="space-y-2 flex-1">
                     <Skeleton className="h-4 w-3/4" />
                     <Skeleton className="h-3 w-full" />
@@ -196,149 +272,295 @@ export default function ChatPage() {
                 </div>
               ))}
             </div>
-          ) : conversations?.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground flex flex-col items-center">
-              <MessageSquare className="h-10 w-10 mb-2 opacity-20" />
-              <p className="text-sm">No conversations found.</p>
-            </div>
+          ) : isError ? (
+            <ErrorState title="Could not load conversations" hint="Check your connection and try again." onRetry={() => void refetch()} />
+          ) : conversations.length === 0 ? (
+            <EmptyState
+              icon={<MessageSquare className="h-10 w-10" />}
+              title={search ? "No matching conversations" : "No conversations yet"}
+              hint={search ? "Try a different name, number or word." : "New WhatsApp messages will appear here automatically."}
+            />
           ) : (
-            <div className="divide-y divide-border">
-              {conversations?.map((conv) => (
-                <button
-                  key={conv.id}
-                  onClick={() => setSelectedConvId(conv.id)}
-                  className={`w-full text-left p-4 hover:bg-muted/50 transition-colors flex gap-3 ${selectedConvId === conv.id ? 'bg-muted' : ''}`}
-                  data-testid={`btn-select-conv-${conv.id}`}
-                >
-                  <Avatar className="h-10 w-10 border border-border/50">
-                    <AvatarFallback className="bg-primary/10 text-primary">
-                      {conv.customer?.name?.substring(0, 2).toUpperCase() || 'CU'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0 overflow-hidden">
-                    <div className="flex justify-between items-baseline mb-1">
-                      <p className="text-sm font-semibold truncate text-foreground">{conv.customer?.name}</p>
-                      <p className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
-                        {conv.lastMessageAt ? format(parseISO(conv.lastMessageAt), "h:mm a") : ''}
-                      </p>
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate mb-2">
-                      {conv.lastMessage || "No messages yet"}
-                    </p>
-                    <div className="flex gap-1 items-center overflow-x-auto no-scrollbar pb-1">
-                      <ChannelGlyph channel={(conv as unknown as { channel?: string }).channel} />
-                      {(() => {
-                        const s = getChatStatus(conv as unknown as ConvWithChannel, slaMinutes);
-                        return (
-                          <Badge variant="outline" className={`text-[9px] px-1.5 h-4 border ${s.tone}`}>
-                            {s.label}
-                          </Badge>
-                        );
-                      })()}
-                      {conv.tags?.slice(0, 2).map((tag, idx) => (
-                        <Badge key={idx} variant="outline" className="text-[9px] px-1 h-4 bg-background">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  {conv.unreadCount > 0 && (
-                    <div className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center flex-shrink-0 self-center">
-                      {conv.unreadCount}
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
+            <ul className="divide-y divide-border" data-testid="conversation-list">
+              {conversations.slice(0, visible).map((conv) => {
+                const tone = chatTone(conv, slaMinutes);
+                const unread = conv.unreadCount > 0;
+                const selected = selectedConvId === conv.id;
+                return (
+                  <li key={conv.id}>
+                    <button
+                      type="button"
+                      onClick={() => selectConv(conv.id)}
+                      aria-current={selected ? "true" : undefined}
+                      className={cn(
+                        "w-full text-left px-3 sm:px-4 py-3 min-h-[72px] flex gap-3 transition-colors hover:bg-muted/60",
+                        selected && "bg-muted",
+                      )}
+                      data-testid={`btn-select-conv-${conv.id}`}
+                    >
+                      <Avatar className="h-11 w-11 shrink-0">
+                        <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                          {initials(customerTitle(conv))}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className={cn("text-sm truncate", unread ? "font-bold" : "font-medium")}>{customerTitle(conv)}</p>
+                          <time className={cn("text-[11px] whitespace-nowrap", unread ? "text-primary font-semibold" : "text-muted-foreground")}>
+                            {listTime(conv.lastMessageAt)}
+                          </time>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className={cn("text-[13px] truncate flex-1", unread ? "text-foreground" : "text-muted-foreground")}>
+                            {conv.lastSenderType === "agent" && <span className="text-muted-foreground">You: </span>}
+                            {conv.lastMessage || "No messages yet"}
+                          </p>
+                          {unread && (
+                            <span
+                              className="min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold flex items-center justify-center shrink-0"
+                              aria-label={`${conv.unreadCount} unread`}
+                            >
+                              {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1.5 min-w-0">
+                          <ChannelGlyph channel={conv.channel} />
+                          {tone && (
+                            <Badge variant="outline" className={cn("text-[10px] px-1.5 h-[18px] font-medium border", tone.tone)}>
+                              {tone.label}
+                            </Badge>
+                          )}
+                          {conv.assignedAgent && (
+                            <span className="text-[11px] text-muted-foreground truncate">{userLabel(conv.assignedAgent as AppUser)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+              {conversations.length > visible && (
+                <li className="p-3">
+                  <Button variant="outline" className="w-full h-10" onClick={() => setVisible((v) => v + PAGE)}>
+                    Show more ({conversations.length - visible})
+                  </Button>
+                </li>
+              )}
+            </ul>
           )}
         </ScrollArea>
-      </div>
+      </aside>
 
-      {/* Center - Chat Area */}
-      {selectedConvId ? (
-        <ChatCenter conversationId={selectedConvId} currentUserId={user?.id} currentUserName={user?.name ?? undefined} message={message} setMessage={setMessage} />
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center bg-muted/10 text-muted-foreground border-r border-border">
-          <MessageSquarePlus className="h-12 w-12 mb-4 opacity-20" />
-          <h3 className="text-lg font-medium text-foreground">Select a conversation</h3>
-          <p className="text-sm">Choose a patient from the list to start messaging</p>
-        </div>
+      {/* -------- Conversation -------- */}
+      <section className={cn("flex-1 min-w-0 min-h-0 flex-col", selectedConvId ? "flex" : "hidden md:flex")}>
+        {selectedConvId ? (
+          <ChatCenter
+            key={selectedConvId}
+            conversationId={selectedConvId}
+            currentUser={me as AppUser | undefined}
+            message={message}
+            setMessage={setMessage}
+            onBack={() => selectConv(null)}
+            onOpenDetails={() => setDetailsOpen(true)}
+            showDetailsButton={!wideDetails}
+          />
+        ) : (
+          <EmptyState
+            className="flex-1"
+            icon={<MessageSquare className="h-12 w-12" />}
+            title="Select a conversation"
+            hint="Choose a chat from the list to read and reply."
+          />
+        )}
+      </section>
+
+      {/* -------- Details: docked on wide screens, drawer otherwise -------- */}
+      {selectedConvId && wideDetails && (
+        <aside className="w-[320px] flex-shrink-0 border-l border-border min-h-0" aria-label="Conversation details">
+          <ChatContextPanel conversationId={selectedConvId} onInsertReply={insertReply} />
+        </aside>
       )}
-
-      {/* Right - Context Panel */}
-      {selectedConvId && (
-        <ChatContextPanel conversationId={selectedConvId} onInsertReply={insertReply} />
+      {selectedConvId && !wideDetails && (
+        <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <SheetContent side="right" className="p-0 w-full sm:max-w-sm">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Conversation details</SheetTitle>
+              <SheetDescription>Customer, tags, assignment and quick replies</SheetDescription>
+            </SheetHeader>
+            <ChatContextPanel conversationId={selectedConvId} onInsertReply={insertReply} />
+          </SheetContent>
+        </Sheet>
       )}
     </div>
   );
 }
 
-function ChatCenter({ conversationId, currentUserId, currentUserName, message, setMessage }: { conversationId: number, currentUserId?: number, currentUserName?: string, message: string, setMessage: React.Dispatch<React.SetStateAction<string>> }) {
+/* ------------------------------------------------------------ conversation */
+
+function StatusTicks({ status }: { status?: string }) {
+  if (status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-destructive" aria-label="Not delivered" />;
+  if (status === "read") return <CheckCheck className="h-3.5 w-3.5 text-info" aria-label="Read" />;
+  if (status === "delivered") return <CheckCheck className="h-3.5 w-3.5 opacity-70" aria-label="Delivered" />;
+  return <Check className="h-3.5 w-3.5 opacity-70" aria-label="Sent" />;
+}
+
+function ChatCenter({
+  conversationId,
+  currentUser,
+  message,
+  setMessage,
+  onBack,
+  onOpenDetails,
+  showDetailsButton,
+}: {
+  conversationId: number;
+  currentUser?: AppUser;
+  message: string;
+  setMessage: React.Dispatch<React.SetStateAction<string>>;
+  onBack: () => void;
+  onOpenDetails: () => void;
+  showDetailsButton: boolean;
+}) {
   const [isNote, setIsNote] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [atBottom, setAtBottom] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastCountRef = useRef(0);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const uploadMut = useUploadAttachment();
   const { data: perms } = useMyPermissions();
   const canSend = perms?.canSendMessages !== false;
+  const currentUserName = currentUser ? userLabel(currentUser) : undefined;
 
-  const { data: conv, isLoading: convLoading } = useGetConversation(conversationId, {
-    query: { enabled: !!conversationId, queryKey: getGetConversationQueryKey(conversationId) }
+  const { data: conv, isLoading: convLoading, isError: convError, refetch: refetchConv } = useGetConversation(conversationId, {
+    query: { enabled: !!conversationId, queryKey: getGetConversationQueryKey(conversationId), staleTime: 5_000 },
   });
-  
-  const { data: messages, isLoading: msgsLoading } = useListMessages(conversationId, {
-    query: { enabled: !!conversationId, queryKey: getListMessagesQueryKey(conversationId) }
-  });
+  const { data: messages, isLoading: msgsLoading, isError: msgsError, refetch: refetchMsgs, append } = useThread(conversationId);
 
-  // Typing indicator state
   const { typingAgent, handleTyping } = useTypingIndicator();
-
-  // Real-time: listen for new messages on this conversation via Socket.io
-  const handleNewMessage = useCallback((msg: unknown) => {
-    queryClient.setQueryData(
-      getListMessagesQueryKey(conversationId),
-      (old: unknown[] | undefined) => old ? [...old, msg] : [msg],
-    );
-    queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
-  }, [conversationId, queryClient]);
-
-  useConversationSocket(conversationId, handleNewMessage, handleTyping, currentUserName);
-
-  // Emit typing events using the authenticated current user's name
+  const onSocketMessage = useCallback((msg: unknown) => append(msg as Message), [append]);
+  useConversationSocket(conversationId, onSocketMessage, handleTyping, currentUserName);
   const emitTyping = useTypingEmit(conversationId, currentUserName);
 
   const sendMessageMut = useSendMessage();
   const resolveMut = useResolveConversation();
   const assignMut = useAssignConversation();
+  const patchMut = usePatchConversation();
 
-  // Auto-scroll to bottom
+  const isAssignedToMe = !!conv?.assignedAgentId && conv.assignedAgentId === currentUser?.id;
+  const isAdmin = currentUser?.role === "admin";
+  const mustClaim = !!conv && !conv.assignedAgentId && !isAdmin;
+  const channel = (conv as { channel?: string } | undefined)?.channel ?? "whatsapp";
+
+  // ---- mark read (only while the tab is visible) ----
+  const unread = conv?.unreadCount ?? 0;
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+    if (!conv || unread === 0 || mustClaim) return;
+    if (document.visibilityState !== "visible") return;
+    let cancelled = false;
+    markConversationRead(conversationId)
+      .then(() => {
+        if (cancelled) return;
+        void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(conversationId) });
+        void queryClient.invalidateQueries({ queryKey: ["/api/inbox/sync"] });
+      })
+      .catch(() => { /* non-critical */ });
+    return () => { cancelled = true; };
+  }, [conversationId, unread, conv, mustClaim, queryClient, messages?.length]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refetchMsgs();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refetchMsgs]);
+
+  // ---- scrolling: stick to bottom only if the user is already there ----
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+  };
+  const scrollToBottom = useCallback((smooth = true) => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  }, []);
+  useEffect(() => {
+    const n = messages?.length ?? 0;
+    if (n === 0) return;
+    const first = lastCountRef.current === 0;
+    const lastMsg = messages![n - 1];
+    if (first || atBottom || lastMsg.senderType === "agent") scrollToBottom(!first);
+    lastCountRef.current = n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages?.length]);
+
+  // ---- composer ----
+  const autosize = () => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  };
+  useEffect(autosize, [message]);
+
+  const invalidateLists = () => {
+    void queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+    void queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(conversationId) });
+    void queryClient.invalidateQueries({ queryKey: ["/api/inbox/sync"] });
+  };
 
   const handleSend = () => {
+    if (sendMessageMut.isPending) return;
     if (!message.trim() && attachments.length === 0) return;
     if (!canSend) {
       toast({ title: "You do not have permission to send messages", variant: "destructive" });
       return;
     }
     sendMessageMut.mutate(
-      { id: conversationId, data: { body: message || "(attachment)", isNote, attachments } },
+      { id: conversationId, data: { body: message.trim() || "(attachment)", isNote, attachments } },
       {
-        onSuccess: () => {
+        onSuccess: (sent) => {
+          append(sent as Message);
           setMessage("");
           setIsNote(false);
           setAttachments([]);
-          queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(conversationId) });
-          queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+          invalidateLists();
+          const err = (sent as { deliveryError?: string }).deliveryError;
+          if (err) {
+            toast({
+              title: "Message saved but not delivered",
+              description: /131047|24/.test(err)
+                ? "WhatsApp only allows free-form replies within 24 hours of the customer's last message."
+                : err,
+              variant: "destructive",
+            });
+          }
+          requestAnimationFrame(() => textareaRef.current?.focus());
         },
-        onError: () => toast({ title: "Failed to send message", variant: "destructive" })
-      }
+        onError: (e) =>
+          toast({
+            title: "Message was not sent",
+            description: (e as { data?: { error?: string } }).data?.error ?? "Check your connection and try again.",
+            variant: "destructive",
+          }),
+      },
     );
+  };
+
+  const coarsePointer = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Phones: Enter = new line (use the Send button). Desktop: Enter sends.
+    if (e.key === "Enter" && !e.shiftKey && !coarsePointer) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -346,13 +568,13 @@ function ChatCenter({ conversationId, currentUserId, currentUserName, message, s
     if (!file) return;
     if (file.size > 400_000) {
       toast({ title: "File too large (max 400KB)", variant: "destructive" });
+      e.target.value = "";
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      const dataUrl = reader.result as string;
       uploadMut.mutate(
-        { dataUrl, filename: file.name },
+        { dataUrl: reader.result as string, filename: file.name },
         {
           onSuccess: (res) => setAttachments((prev) => [...prev, res.url]),
           onError: () => toast({ title: "Upload failed", variant: "destructive" }),
@@ -363,249 +585,299 @@ function ChatCenter({ conversationId, currentUserId, currentUserName, message, s
     e.target.value = "";
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   const handleResolve = () => {
     resolveMut.mutate({ id: conversationId }, {
-      onSuccess: () => {
-        toast({ title: "Conversation completed" });
-        queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(conversationId) });
-        queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
-      }
+      onSuccess: () => { toast({ title: "Conversation completed" }); invalidateLists(); },
+      onError: () => toast({ title: "Could not complete the conversation", variant: "destructive" }),
+    });
+  };
+  const handleReopen = () => {
+    patchMut.mutate({ id: conversationId, data: { status: "open" } }, {
+      onSuccess: () => { toast({ title: "Conversation reopened" }); invalidateLists(); },
+      onError: () => toast({ title: "Could not reopen", variant: "destructive" }),
+    });
+  };
+  const handleClaim = () => {
+    if (!currentUser) return;
+    assignMut.mutate({ id: conversationId, data: { agentId: currentUser.id } }, {
+      onSuccess: () => { toast({ title: "Conversation assigned to you" }); invalidateLists(); },
+      onError: () => toast({ title: "Could not claim this conversation", variant: "destructive" }),
     });
   };
 
-  const handleAssignToMe = () => {
-    if (!currentUserId) return;
-    assignMut.mutate({ id: conversationId, data: { agentId: currentUserId } }, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(conversationId) });
-        queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
-      }
-    });
-  };
+  // ---- 24h WhatsApp window ----
+  const lastCustomerAt = useMemo(() => {
+    const m = [...(messages ?? [])].reverse().find((x) => x.senderType === "customer");
+    return m ? parseISO(m.createdAt) : null;
+  }, [messages]);
+  const outsideWindow =
+    channel === "whatsapp" && !isNote && (!lastCustomerAt || differenceInHours(new Date(), lastCustomerAt) >= 24);
 
-  if (convLoading || msgsLoading) {
-    return <div className="flex-1 flex items-center justify-center border-r border-border"><Skeleton className="h-8 w-8 rounded-full" /></div>;
+  // ---- grouped rows with date separators ----
+  const rows = useMemo(() => {
+    const out: ({ kind: "day"; key: string; label: string } | { kind: "msg"; key: string; msg: Message })[] = [];
+    let lastDay = "";
+    for (const m of messages ?? []) {
+      const d = parseISO(m.createdAt);
+      const dk = format(d, "yyyy-MM-dd");
+      if (dk !== lastDay) {
+        out.push({ kind: "day", key: `d-${dk}`, label: dayLabel(d) });
+        lastDay = dk;
+      }
+      out.push({ kind: "msg", key: `m-${m.id}`, msg: m });
+    }
+    return out;
+  }, [messages]);
+
+  if (convError || msgsError) {
+    return (
+      <div className="flex-1 flex flex-col">
+        <div className="h-14 px-2 border-b border-border flex items-center md:hidden">
+          <Button variant="ghost" size="icon" className="h-11 w-11" onClick={onBack} aria-label="Back to conversations"><ChevronLeft className="h-5 w-5" /></Button>
+        </div>
+        <ErrorState
+          className="flex-1"
+          title="Could not open this conversation"
+          hint="It may have been removed, or you may not have access to it."
+          onRetry={() => { void refetchConv(); void refetchMsgs(); }}
+        />
+      </div>
+    );
   }
 
+  const title = conv ? customerTitle(conv) : "";
+
   return (
-    <div className="flex-1 flex flex-col border-r border-border min-w-[400px]">
+    <div className="flex-1 flex flex-col min-h-0 min-w-0">
       {/* Header */}
-      <div className="h-16 px-6 border-b border-border flex items-center justify-between bg-card flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Avatar className="h-9 w-9">
-            <AvatarFallback className="bg-primary/10 text-primary">{conv?.customer?.name?.substring(0, 2).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <div>
-            <h3 className="text-sm font-semibold">{conv?.customer?.name}</h3>
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              {conv?.assignedAgent ? (
-                <>Assigned to {conv.assignedAgent.name}</>
-              ) : (
-                <span className="text-amber-500">Unassigned</span>
-              )}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <ChatReasonPicker
-            conversationId={conversationId}
-            currentReasonId={(conv as { chatReasonId?: number | null } | undefined)?.chatReasonId ?? null}
-          />
-          {conv?.status !== "completed" && (
-            <Button size="sm" variant="outline" onClick={handleResolve} disabled={resolveMut.isPending} data-testid="btn-resolve">
-              <CheckCircle2 className="h-4 w-4 mr-2 text-emerald-500" />
-              Resolve
-            </Button>
-          )}
-          {!conv?.assignedAgentId && conv?.status !== "completed" && (
-            <Button size="sm" variant="default" onClick={handleAssignToMe} disabled={assignMut.isPending} data-testid="btn-assign-me">
-              Assign to me
-            </Button>
+      <header className="min-h-14 px-2 sm:px-4 py-2 border-b border-border flex items-center gap-2 bg-card flex-shrink-0 pt-safe">
+        <Button variant="ghost" size="icon" className="h-11 w-11 md:hidden shrink-0" onClick={onBack} aria-label="Back to conversations" data-testid="btn-back">
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <Avatar className="h-9 w-9 shrink-0">
+          <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">{initials(title)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          {convLoading ? <Skeleton className="h-4 w-32" /> : (
+            <>
+              <h3 className="text-sm font-semibold truncate">{title}</h3>
+              <p className="text-xs text-muted-foreground truncate flex items-center gap-1.5">
+                <ChannelGlyph channel={channel} className="h-3 w-3" />
+                {conv?.customer?.phone}
+                <span aria-hidden className="hidden sm:inline">·</span>
+                <span className="hidden sm:inline truncate">
+                  {conv?.assignedAgent ? userLabel(conv.assignedAgent as AppUser) : <span className="text-warning font-medium">Unassigned</span>}
+                </span>
+              </p>
+            </>
           )}
         </div>
-      </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {conv && conv.status !== "completed" && (isAssignedToMe || isAdmin) && (
+            <Button size="sm" variant="outline" className="h-9" onClick={handleResolve} disabled={resolveMut.isPending} data-testid="btn-resolve">
+              <CheckCircle2 className="h-4 w-4 sm:mr-2 text-success" />
+              <span className="hidden sm:inline">Resolve</span>
+            </Button>
+          )}
+          {showDetailsButton && (
+            <Button size="icon" variant="ghost" className="h-10 w-10" onClick={onOpenDetails} aria-label="Conversation details" data-testid="btn-details">
+              <PanelRight className="h-5 w-5" />
+            </Button>
+          )}
+        </div>
+      </header>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4 bg-muted/10" ref={scrollRef}>
-        <div className="space-y-4 max-w-3xl mx-auto pb-4">
-          {typingAgent && (
-            <div className="flex justify-start" data-testid="typing-indicator">
-              <div className="flex flex-col gap-1 items-start">
-                <div className="px-4 py-2.5 rounded-2xl rounded-bl-sm bg-card border border-border shadow-sm flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground italic">{typingAgent} is typing</span>
-                  <span className="flex gap-0.5 items-center">
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
-                  </span>
-                </div>
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="absolute inset-0 overflow-y-auto overscroll-contain bg-wallpaper px-3 sm:px-6 py-4"
+          role="log"
+          aria-live="polite"
+          aria-label="Messages"
+          data-testid="message-list"
+        >
+          <div className="max-w-3xl mx-auto space-y-1.5">
+            {msgsLoading && (
+              <div className="space-y-3 py-6" aria-busy>
+                <Skeleton className="h-10 w-2/3" />
+                <Skeleton className="h-10 w-1/2 ml-auto" />
+                <Skeleton className="h-10 w-3/5" />
               </div>
+            )}
+            {!msgsLoading && rows.length === 0 && (
+              <EmptyState title="No messages yet" hint="Write the first message below." />
+            )}
+            {rows.map((row) => {
+              if (row.kind === "day") {
+                return (
+                  <div key={row.key} className="flex justify-center py-2">
+                    <span className="bg-card/90 border border-border text-muted-foreground text-[11px] font-medium px-3 py-1 rounded-full shadow-sm">
+                      {row.label}
+                    </span>
+                  </div>
+                );
+              }
+              const msg = row.msg;
+              const isMe = msg.senderType === "agent";
+              if (msg.senderType === "system") {
+                return (
+                  <div key={row.key} className="flex justify-center py-1">
+                    <span className="bg-muted px-3 py-1 rounded-full text-xs text-muted-foreground">{msg.body}</span>
+                  </div>
+                );
+              }
+              if (msg.isNote) {
+                return (
+                  <div key={row.key} className="flex justify-center py-1.5">
+                    <div className="bg-warning/10 border border-warning/30 rounded-lg px-3 py-2 max-w-lg w-full">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Clock className="h-3 w-3 text-warning" aria-hidden />
+                        <span className="text-xs font-semibold text-warning">Internal note</span>
+                        <time className="text-[11px] text-muted-foreground ml-auto">{format(parseISO(msg.createdAt), "h:mm a")}</time>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                    </div>
+                  </div>
+                );
+              }
+              const failed = (msg.status as string) === "failed";
+              return (
+                <div key={row.key} className={cn("flex", isMe ? "justify-end" : "justify-start")}>
+                  <div
+                    className={cn(
+                      "max-w-[85%] sm:max-w-[70%] rounded-2xl px-3.5 py-2 shadow-sm",
+                      isMe ? "bg-bubble-out text-bubble-out-foreground rounded-br-md" : "bg-bubble-in text-bubble-in-foreground border border-border rounded-bl-md",
+                      failed && "ring-2 ring-destructive/60",
+                    )}
+                  >
+                    <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.body}</p>
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="mt-1.5 flex flex-col gap-1">
+                        {msg.attachments.map((url, i) =>
+                          /^data:image|\.(png|jpe?g|gif|webp)$/i.test(url) ? (
+                            <img key={i} src={url} alt="Attachment" className="rounded-lg max-h-56 object-contain" loading="lazy" />
+                          ) : (
+                            <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="text-xs underline break-all">Attachment {i + 1}</a>
+                          ),
+                        )}
+                      </div>
+                    )}
+                    <div className={cn("flex items-center justify-end gap-1 mt-0.5 text-[11px]", isMe ? "opacity-80" : "text-muted-foreground")}>
+                      <time>{format(parseISO(msg.createdAt), "h:mm a")}</time>
+                      {isMe && <StatusTicks status={msg.status} />}
+                    </div>
+                    {failed && <p className="text-[11px] font-semibold mt-0.5 text-right">Not delivered</p>}
+                  </div>
+                </div>
+              );
+            })}
+            {typingAgent && (
+              <div className="flex justify-start" data-testid="typing-indicator">
+                <span className="text-xs text-muted-foreground italic px-2">{typingAgent} is typing…</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {!atBottom && rows.length > 0 && (
+          <Button
+            size="icon"
+            variant="secondary"
+            className="absolute bottom-3 right-4 h-10 w-10 rounded-full shadow-md border border-border"
+            onClick={() => scrollToBottom()}
+            aria-label="Jump to latest message"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+
+      {/* Composer */}
+      {conv?.status === "completed" ? (
+        <div className="p-3 bg-card border-t border-border flex items-center justify-between gap-3 pb-safe">
+          <p className="text-sm text-muted-foreground">This conversation is completed.</p>
+          <Button size="sm" variant="outline" onClick={handleReopen} disabled={patchMut.isPending}>
+            <RotateCcw className="h-4 w-4 mr-2" /> Reopen
+          </Button>
+        </div>
+      ) : mustClaim ? (
+        <div className="p-3 bg-card border-t border-border flex items-center justify-between gap-3 pb-safe">
+          <p className="text-sm text-muted-foreground">This chat is in the queue. Claim it to reply.</p>
+          <Button size="sm" onClick={handleClaim} disabled={assignMut.isPending} data-testid="btn-assign-me">Claim</Button>
+        </div>
+      ) : (
+        <div className="bg-card border-t border-border px-2 sm:px-4 pt-2 pb-2 pb-safe">
+          {outsideWindow && (
+            <p role="status" className="max-w-3xl mx-auto mb-2 rounded-md bg-warning/10 border border-warning/30 px-3 py-1.5 text-xs text-warning">
+              More than 24 hours since the customer's last message — WhatsApp may reject a normal reply. Use an internal note, or wait for the customer to write.
+            </p>
+          )}
+          {!conv?.assignedAgentId && isAdmin && (
+            <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>Unassigned chat.</span>
+              <Button size="sm" variant="outline" className="h-8" onClick={handleClaim} disabled={assignMut.isPending} data-testid="btn-assign-me">Assign to me</Button>
             </div>
           )}
-          {messages?.map((msg) => {
-            const isMe = msg.senderType === "agent";
-            const isSystem = msg.senderType === "system";
-            
-            if (isSystem) {
-              return (
-                <div key={msg.id} className="flex justify-center my-4">
-                  <span className="bg-muted px-3 py-1 rounded-full text-xs text-muted-foreground">
-                    {msg.body}
-                  </span>
-                </div>
-              );
-            }
-
-            if (msg.isNote) {
-              return (
-                <div key={msg.id} className="flex justify-center my-4">
-                  <div className="bg-amber-100 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 rounded-lg px-4 py-3 max-w-lg w-full">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Clock className="h-3 w-3 text-amber-600 dark:text-amber-400" />
-                      <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">Internal Note</span>
-                      <span className="text-[10px] text-amber-700/70 dark:text-amber-400/70 ml-auto">{format(parseISO(msg.createdAt), "MMM d, h:mm a")}</span>
-                    </div>
-                    <p className="text-sm text-amber-900 dark:text-amber-100">{msg.body}</p>
-                  </div>
-                </div>
-              );
-            }
-
-            return (
-              <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex flex-col gap-1 max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
-                  <div 
-                    className={`px-4 py-2.5 rounded-2xl ${
-                      isMe 
-                        ? 'bg-primary text-primary-foreground rounded-br-sm shadow-sm' 
-                        : 'bg-card border border-border rounded-bl-sm shadow-sm'
-                    }`}
-                  >
-                    <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground px-1">
-                    {format(parseISO(msg.createdAt), "h:mm a")}
-                    {isMe && (msg.status as string) === "failed" && (
-                      <span className="ml-1 font-semibold text-destructive">
-                        · Not delivered (WhatsApp)
-                      </span>
-                    )}
-                    {isMe && (msg.status as string) === "read" && " · Read"}
-                    {isMe && (msg.status as string) === "delivered" && " · Delivered"}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </ScrollArea>
-
-      {/* Input Area */}
-      {conv?.status !== "completed" ? (
-        <div className="p-4 bg-card border-t border-border">
-          <div className="max-w-3xl mx-auto relative rounded-xl border border-border bg-background focus-within:ring-1 focus-within:ring-ring overflow-hidden shadow-sm">
+          <div
+            className={cn(
+              "max-w-3xl mx-auto rounded-xl border bg-background focus-within:ring-2 focus-within:ring-ring overflow-hidden",
+              isNote ? "border-warning/50" : "border-input",
+            )}
+          >
             {isNote && (
-              <div className="bg-amber-100 dark:bg-amber-900/30 px-3 py-1.5 text-xs font-medium text-amber-800 dark:text-amber-300 border-b border-amber-200 dark:border-amber-800/50 flex items-center">
-                <Clock className="h-3 w-3 mr-1.5" />
-                Drafting Internal Note (Not visible to patient)
+              <div className="bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning border-b border-warning/30 flex items-center">
+                <Clock className="h-3 w-3 mr-1.5" aria-hidden /> Internal note — not sent to the customer
               </div>
             )}
             <Textarea
+              ref={textareaRef}
               value={message}
               onChange={(e) => { setMessage(e.target.value); emitTyping(); }}
               onKeyDown={handleKeyDown}
-              placeholder={isNote ? "Type an internal note..." : "Type a message..."}
-              className="min-h-[80px] border-0 focus-visible:ring-0 resize-none rounded-none text-sm p-3 bg-transparent"
+              rows={1}
+              placeholder={isNote ? "Write an internal note…" : "Type a message"}
+              aria-label={isNote ? "Internal note" : "Message"}
+              className="min-h-[48px] max-h-40 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 resize-none rounded-none text-base sm:text-sm p-3 bg-transparent"
               data-testid="input-chat-message"
             />
-            <div className="flex items-center justify-between p-2 bg-muted/20 border-t border-border">
-              <div className="flex items-center gap-1 flex-wrap">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className={`h-8 px-2 text-xs ${isNote ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900 dark:text-amber-100' : 'text-muted-foreground'}`}
-                  onClick={() => setIsNote(!isNote)}
+            <div className="flex items-center justify-between px-2 py-1.5 border-t border-border">
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={cn("h-10 px-3 text-xs", isNote && "bg-warning/15 text-warning")}
+                  onClick={() => setIsNote((v) => !v)}
+                  aria-pressed={isNote}
                 >
-                  <Clock className="h-3 w-3 mr-1.5" />
-                  Note
+                  <Clock className="h-3.5 w-3.5 mr-1.5" /> Note
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => fileInputRef.current?.click()} disabled={!canSend}>
-                  <Paperclip className="h-4 w-4" />
+                <Button type="button" variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground" onClick={() => fileInputRef.current?.click()} disabled={!canSend || uploadMut.isPending} aria-label="Attach a file">
+                  {uploadMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                 </Button>
                 <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt" className="hidden" onChange={handleFileSelect} />
                 {attachments.length > 0 && (
-                  <span className="text-[10px] text-muted-foreground">{attachments.length} file(s)</span>
+                  <button type="button" className="text-xs text-muted-foreground flex items-center gap-1" onClick={() => setAttachments([])} aria-label="Remove attachments">
+                    {attachments.length} file(s) <X className="h-3 w-3" />
+                  </button>
                 )}
-                <ChannelButtons />
               </div>
-              <Button 
-                size="sm" 
-                className="h-8 px-4" 
-                onClick={handleSend} 
+              <Button
+                type="button"
+                className="h-10 px-5"
+                onClick={handleSend}
                 disabled={(!message.trim() && attachments.length === 0) || sendMessageMut.isPending || !canSend}
                 data-testid="btn-send-message"
               >
-                {sendMessageMut.isPending ? <Skeleton className="h-4 w-4" /> : <Send className="h-4 w-4 mr-2" />}
-                Send
+                {sendMessageMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 sm:mr-2" />}
+                <span className="hidden sm:inline">Send</span>
+                <span className="sr-only sm:hidden">Send</span>
               </Button>
             </div>
           </div>
         </div>
-      ) : (
-        <div className="p-4 bg-muted text-center text-sm text-muted-foreground border-t border-border">
-          This conversation is completed. 
-        </div>
       )}
-    </div>
-  );
-}
-
-function ChannelButtons() {
-  const { toast } = useToast();
-  const channels: { key: string; label: string; icon: React.ReactNode; color: string }[] = [
-    { key: "web",       label: "Web Chat (active)", icon: <Globe className="h-4 w-4" />,                     color: "text-emerald-600" },
-    { key: "whatsapp",  label: "WhatsApp",          icon: <FaWhatsapp className="h-4 w-4" />,                color: "text-[#25D366]" },
-    { key: "messenger", label: "Facebook Messenger",icon: <FaFacebookMessenger className="h-4 w-4" />,       color: "text-[#0084FF]" },
-    { key: "instagram", label: "Instagram DM",      icon: <FaInstagram className="h-4 w-4" />,               color: "text-[#E4405F]" },
-    { key: "sms",       label: "SMS",               icon: <FaSms className="h-4 w-4" />,                     color: "text-slate-500" },
-  ];
-  const [active, setActive] = React.useState<string>("web");
-
-  const handleClick = (channelKey: string, channelLabel: string) => {
-    if (channelKey === "web") {
-      setActive("web");
-      return;
-    }
-    toast({
-      title: `${channelLabel} not connected yet`,
-      description: "We'll wire this channel up once the integration step is approved.",
-    });
-  };
-
-  return (
-    <div className="flex items-center gap-0.5 ml-1 pl-2 border-l border-border" data-testid="channel-buttons">
-      {channels.map((c) => (
-        <Button
-          key={c.key}
-          type="button"
-          variant="ghost"
-          size="icon"
-          title={c.label}
-          aria-label={c.label}
-          onClick={() => handleClick(c.key, c.label)}
-          className={`h-8 w-8 ${active === c.key ? `${c.color} bg-muted` : "text-muted-foreground hover:" + c.color}`}
-          data-testid={`btn-channel-${c.key}`}
-        >
-          {c.icon}
-        </Button>
-      ))}
     </div>
   );
 }
@@ -621,6 +893,7 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const { data: quickReplies } = useListQuickReplies();
   const [replySearch, setReplySearch] = useState("");
   const { data: users } = useListUsers();
+  const { data: me } = useGetMe();
   const { data: allTags } = useListTags();
   const customer = conv?.customer;
 
@@ -687,9 +960,9 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const suggestedTags = allTags?.filter(t => !conv?.tags?.includes(t.name)) || [];
 
   return (
-    <div className="w-80 flex-shrink-0 flex flex-col bg-sidebar overflow-hidden min-h-0">
+    <div className="w-full h-full flex flex-col bg-card overflow-hidden min-h-0">
       <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
-        <TabsList className="w-full justify-start h-12 rounded-none border-b border-border bg-transparent px-4">
+        <TabsList className="w-full justify-start h-12 rounded-none border-b border-border bg-transparent px-2 sm:px-4">
           <TabsTrigger value="details" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4">Details</TabsTrigger>
           <TabsTrigger value="replies" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4">Quick Replies</TabsTrigger>
         </TabsList>
@@ -720,20 +993,25 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
                   <Select
                     value={conv?.assignedAgentId ? String(conv.assignedAgentId) : "unassigned"}
                     onValueChange={handleAssign}
-                    disabled={patchMut.isPending}
+                    disabled={patchMut.isPending || me?.role !== "admin"}
                   >
                     <SelectTrigger className="h-8 text-xs bg-background" data-testid="select-assignee">
                       <SelectValue placeholder="Unassigned" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {users?.map(u => (
-                        <SelectItem key={u.id} value={String(u.id)}>{u.name}</SelectItem>
+                      {users?.filter((u) => (u as AppUser).isActive !== false).map(u => (
+                        <SelectItem key={u.id} value={String(u.id)}>{userLabel(u as AppUser)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Reason</label>
+              <div><ChatReasonPicker conversationId={conversationId} currentReasonId={(conv as { chatReasonId?: number | null } | undefined)?.chatReasonId ?? null} /></div>
             </div>
 
             <Separator />
@@ -810,13 +1088,13 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
 
             <Separator />
 
-            {/* Patient Info */}
+            {/* Customer info */}
             <div className="flex flex-col items-center text-center">
               <Avatar className="h-16 w-16 mb-3 border-2 border-border shadow-sm">
                 <AvatarFallback className="text-lg bg-primary/10 text-primary">{customer?.name?.substring(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>
               <h3 className="font-semibold text-base">{customer?.name}</h3>
-              <p className="text-sm text-muted-foreground">Patient</p>
+              <p className="text-sm text-muted-foreground">Customer</p>
             </div>
 
             <Separator />
@@ -841,10 +1119,10 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
               <>
                 <Separator />
                 <div className="space-y-4">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Clinical Notes</h4>
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes</h4>
                   {customer.prescriptionNotes && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md border border-blue-100 dark:border-blue-800/50">
-                      <p className="text-xs font-semibold text-blue-800 dark:text-blue-300 mb-1">Prescription Data</p>
+                      <p className="text-xs font-semibold text-blue-800 dark:text-blue-300 mb-1">Prescription notes</p>
                       <p className="text-sm text-blue-900 dark:text-blue-100">{customer.prescriptionNotes}</p>
                     </div>
                   )}

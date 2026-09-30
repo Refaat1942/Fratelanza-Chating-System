@@ -55,6 +55,8 @@ export function useInsights() {
 export interface Branding {
   companyName: string;
   logoUrl: string | null;
+  primaryColor?: string | null;
+  accentColor?: string | null;
 }
 
 export function useBranding() {

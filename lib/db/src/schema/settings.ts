@@ -16,6 +16,9 @@ export const settingsTable = pgTable("settings", {
   // Branding — admin-configurable
   companyName: text("company_name").notNull().default("Fratelanza Chat Management System"),
   logoUrl: text("logo_url"),
+  // Brand colours (hex, e.g. "#0a7d5a"). NULL = built-in default theme.
+  primaryColor: text("primary_color"),
+  accentColor: text("accent_color"),
   // SLA threshold (in minutes) used for chat-monitoring "Late" status
   slaMinutes: integer("sla_minutes").notNull().default(15),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

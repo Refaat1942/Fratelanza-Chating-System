@@ -17,11 +17,13 @@ router.get("/branding", async (_req, res) => {
   res.json({
     companyName: settings.companyName,
     logoUrl: settings.logoUrl,
+    primaryColor: settings.primaryColor,
+    accentColor: settings.accentColor,
   });
 });
 
 router.put("/settings", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
-  const { maxChatsPerAgent, autoAssign, assignmentStrategy, companyName, logoUrl, slaMinutes } = req.body ?? {};
+  const { maxChatsPerAgent, autoAssign, assignmentStrategy, companyName, logoUrl, slaMinutes, primaryColor, accentColor } = req.body ?? {};
   const patch: Record<string, unknown> = {};
 
   if (maxChatsPerAgent !== undefined) {
@@ -53,20 +55,41 @@ router.put("/settings", requireAuth, requireAdmin, async (req: AuthRequest, res)
   }
 
   if (logoUrl !== undefined) {
-    // Accept null/empty (clear) or a valid http(s)/data URL up to ~500KB.
+    // null/"" clears the logo. Otherwise only raster images or SVG delivered as
+    // a base64 data URL (rendered via <img>, so SVG scripts can never run).
     if (logoUrl === null || logoUrl === "") {
       patch.logoUrl = null;
     } else {
       const s = String(logoUrl);
       if (s.length > 700_000) {
-        res.status(400).json({ error: "logoUrl too large (max ~500KB)" });
+        res.status(400).json({ error: "Logo too large (max ~500KB)" });
         return;
       }
-      if (!/^(https?:\/\/|data:image\/)/.test(s)) {
-        res.status(400).json({ error: "logoUrl must be an http(s) or data:image URL" });
+      const m = /^data:image\/(png|jpeg|webp|svg\+xml);base64,([A-Za-z0-9+/=]+)$/.exec(s);
+      if (!m) {
+        res.status(400).json({ error: "Logo must be a PNG, JPG, WEBP or SVG image" });
         return;
+      }
+      if (m[1] === "svg+xml") {
+        const svg = Buffer.from(m[2], "base64").toString("utf8");
+        if (/<script|on\w+\s*=|javascript:|<foreignObject/i.test(svg)) {
+          res.status(400).json({ error: "SVG contains unsafe content" });
+          return;
+        }
       }
       patch.logoUrl = s;
+    }
+  }
+
+  for (const [key, val] of [["primaryColor", primaryColor], ["accentColor", accentColor]] as const) {
+    if (val === undefined) continue;
+    if (val === null || val === "") {
+      patch[key] = null;
+    } else if (typeof val === "string" && /^#[0-9a-fA-F]{6}$/.test(val)) {
+      patch[key] = val.toLowerCase();
+    } else {
+      res.status(400).json({ error: `${key} must be a hex colour like #0a7d5a` });
+      return;
     }
   }
 

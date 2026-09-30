@@ -1,0 +1,131 @@
+/*
+ * Fratelanza design tokens — the ONLY place colours are defined.
+ *
+ * All components use semantic Tailwind classes (bg-primary, text-muted-foreground,
+ * border-border, …) that resolve to these variables, so the whole product is
+ * re-skinned by editing this file or, at runtime, from Settings → Branding
+ * (primary / accent hex → see src/lib/brand.ts).
+ *
+ * Values are HSL triplets ("H S% L%") so Tailwind can apply opacity.
+ *
+ * NOTE: --primary / --brand-accent below are the app's pre-existing brand hues
+ * (cyan / gold) with lightness tuned for WCAG AA contrast. Set the official
+ * Fratelanza colours in Settings → Branding (or replace them here).
+ */
+:root {
+  --app-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
+  --radius: 0.625rem;
+
+  /* Brand */
+  --primary: 190 80% 32%;
+  --primary-foreground: 0 0% 100%;
+  /* Brand accent (gold) — secondary highlights only (badges, charts). */
+  --brand-accent: 45 95% 50%;
+  --brand-accent-foreground: 222 30% 12%;
+  /* shadcn "accent" = neutral hover/selection surface, NOT the brand accent. */
+  --accent: 214 22% 93%;
+  --accent-foreground: 222 25% 14%;
+
+  /* Surfaces */
+  --background: 210 20% 97.5%;
+  --foreground: 222 25% 14%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 25% 14%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 25% 14%;
+  --muted: 214 22% 94%;
+  --muted-foreground: 215 14% 36%;
+  --secondary: 214 22% 93%;
+  --secondary-foreground: 222 25% 18%;
+  --border: 214 18% 87%;
+  --input: 214 16% 80%;
+  --ring: var(--primary);
+
+  /* Sidebar */
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 222 25% 18%;
+  --sidebar-border: 214 18% 87%;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: 214 22% 94%;
+  --sidebar-accent-foreground: 222 25% 14%;
+  --sidebar-ring: var(--primary);
+
+  /* Status */
+  --destructive: 0 72% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 60% 28%;
+  --success-foreground: 0 0% 100%;
+  --warning: 32 92% 38%;
+  --warning-foreground: 0 0% 100%;
+  --info: 212 80% 42%;
+  --info-foreground: 0 0% 100%;
+
+  /* Inbox */
+  --bubble-out: var(--primary);
+  --bubble-out-foreground: var(--primary-foreground);
+  --bubble-in: 0 0% 100%;
+  --bubble-in-foreground: 222 25% 14%;
+  --chat-wallpaper: 210 22% 95%;
+
+  /* Charts */
+  --chart-1: var(--primary);
+  --chart-2: var(--brand-accent);
+  --chart-3: 212 70% 50%;
+  --chart-4: 0 70% 52%;
+  --chart-5: 270 55% 58%;
+
+  /* Elevation (neutral, no glow) */
+  --button-outline: rgba(15, 23, 42, 0.14);
+  --badge-outline: rgba(15, 23, 42, 0.12);
+  --elevate-1: rgba(15, 23, 42, 0.04);
+  --elevate-2: rgba(15, 23, 42, 0.08);
+  --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.06);
+  --shadow: 0 2px 6px -1px rgb(15 23 42 / 0.08), 0 1px 3px -1px rgb(15 23 42 / 0.06);
+  --shadow-lg: 0 10px 24px -6px rgb(15 23 42 / 0.14);
+
+  color-scheme: light;
+}
+
+.dark {
+  --primary: 190 75% 46%;
+  --primary-foreground: 222 35% 8%;
+  --brand-accent: 45 90% 55%;
+  --brand-accent-foreground: 222 35% 8%;
+  --accent: 222 16% 19%;
+  --accent-foreground: 210 20% 96%;
+
+  --background: 222 24% 8%;
+  --foreground: 210 20% 94%;
+  --card: 222 22% 11%;
+  --card-foreground: 210 20% 94%;
+  --popover: 222 22% 11%;
+  --popover-foreground: 210 20% 94%;
+  --muted: 222 16% 16%;
+  --muted-foreground: 215 14% 68%;
+  --secondary: 222 16% 18%;
+  --secondary-foreground: 210 20% 92%;
+  --border: 222 14% 22%;
+  --input: 222 14% 28%;
+
+  --sidebar: 222 24% 10%;
+  --sidebar-foreground: 210 20% 92%;
+  --sidebar-border: 222 14% 20%;
+  --sidebar-accent: 222 16% 17%;
+  --sidebar-accent-foreground: 210 20% 96%;
+
+  --destructive: 0 72% 58%;
+  --success: 152 55% 42%;
+  --warning: 36 92% 52%;
+  --info: 212 85% 62%;
+
+  --bubble-in: 222 18% 17%;
+  --bubble-in-foreground: 210 20% 94%;
+  --chat-wallpaper: 222 22% 9%;
+
+  --button-outline: rgba(255, 255, 255, 0.16);
+  --badge-outline: rgba(255, 255, 255, 0.14);
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.08);
+  color-scheme: dark;
+}

@@ -1,7 +1,7 @@
 /** @type {import("tailwindcss").Config} */
 module.exports = {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
-  darkMode: "class", /* Always use dark (cyberpunk) mode */
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
@@ -30,6 +30,20 @@ module.exports = {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        "brand-accent": {
+          DEFAULT: "hsl(var(--brand-accent))",
+          foreground: "hsl(var(--brand-accent-foreground))",
+        },
+        success: { DEFAULT: "hsl(var(--success))", foreground: "hsl(var(--success-foreground))" },
+        warning: { DEFAULT: "hsl(var(--warning))", foreground: "hsl(var(--warning-foreground))" },
+        info: { DEFAULT: "hsl(var(--info))", foreground: "hsl(var(--info-foreground))" },
+        bubble: {
+          out: "hsl(var(--bubble-out))",
+          "out-foreground": "hsl(var(--bubble-out-foreground))",
+          in: "hsl(var(--bubble-in))",
+          "in-foreground": "hsl(var(--bubble-in-foreground))",
+        },
+        wallpaper: "hsl(var(--chat-wallpaper))",
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
@@ -56,15 +70,6 @@ module.exports = {
       },
       fontFamily: {
         sans: ["var(--app-font-sans)"],
-      },
-      boxShadow: {
-        glow: "0 0 8px rgba(0, 153, 255, 0.2)",
-        "glow-lg": "0 0 12px rgba(0, 153, 255, 0.15)",
-        "glow-gold": "0 0 8px rgba(255, 180, 0, 0.2)",
-      },
-      textShadow: {
-        glow: "none",
-        "glow-gold": "none",
       },
     },
   },

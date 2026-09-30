@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { messagesTable, conversationsTable, customersTable } from "@workspace/db";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and, gt } from "drizzle-orm";
 import { requireAuth, AuthRequest } from "../middlewares/auth";
 import { requirePermission } from "../middlewares/permissions";
 import type { Server as IOServer } from "socket.io";
@@ -20,14 +20,30 @@ async function canAccessConversation(userId: number, role: string, convId: numbe
   return !!conv && conv.assignedAgentId === userId;
 }
 
+// Agents may READ an unassigned (queued) chat so they can decide to claim it.
+async function canReadConversation(userId: number, role: string, convId: number): Promise<boolean> {
+  if (role === "admin") return true;
+  const [conv] = await db
+    .select({ assignedAgentId: conversationsTable.assignedAgentId })
+    .from(conversationsTable)
+    .where(eq(conversationsTable.id, convId))
+    .limit(1);
+  return !!conv && (conv.assignedAgentId === null || conv.assignedAgentId === userId);
+}
+
 router.get("/conversations/:id/messages", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
   const convId = Number(req.params.id);
-  const allowed = await canAccessConversation(req.user!.id, req.user!.role, convId);
+  const allowed = await canReadConversation(req.user!.id, req.user!.role, convId);
   if (!allowed) { res.status(403).json({ error: "Forbidden" }); return; }
 
+  // ?afterId=N returns only newer messages (cheap incremental polling).
+  const afterId = Number(req.query["afterId"]);
+  const where = Number.isInteger(afterId) && afterId > 0
+    ? and(eq(messagesTable.conversationId, convId), gt(messagesTable.id, afterId))
+    : eq(messagesTable.conversationId, convId);
   const messages = await db.select().from(messagesTable)
-    .where(eq(messagesTable.conversationId, convId))
-    .orderBy(asc(messagesTable.createdAt));
+    .where(where)
+    .orderBy(asc(messagesTable.createdAt), asc(messagesTable.id));
   res.json(messages);
 });
 
@@ -134,6 +150,7 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
   const io: IOServer = (req as AuthRequest & { app: { get: (k: string) => IOServer } }).app.get("io");
   if (io) {
     io.to(`conv:${convId}`).emit("new_message", delivered);
+    io.emit("conversation_updated", { conversationId: convId });
   }
 
   res.status(201).json(deliveryError ? { ...delivered, deliveryError } : delivered);
