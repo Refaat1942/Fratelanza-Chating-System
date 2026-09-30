@@ -48,8 +48,13 @@ const VARS = [
   "--primary", "--primary-foreground", "--ring",
   "--brand-accent", "--brand-accent-foreground",
   "--sidebar-primary", "--sidebar-primary-foreground", "--sidebar-ring",
+  "--bubble-out", "--bubble-out-foreground",
 ];
 
+/**
+ * Optional per-deployment overrides from Settings → Branding. With nothing
+ * configured the Fratelanza palette in theme.css applies untouched.
+ */
 export function applyBrandColors(primaryHex?: string | null, accentHex?: string | null): void {
   const root = document.documentElement;
   for (const v of VARS) root.style.removeProperty(v);
@@ -57,17 +62,21 @@ export function applyBrandColors(primaryHex?: string | null, accentHex?: string 
   const p = primaryHex ? hexToRgb(primaryHex) : null;
   if (p) {
     const [h, s, l] = rgbToHsl(p);
-    root.style.setProperty("--primary", `${h} ${s}% ${l}%`);
+    const hsl = `${h} ${s}% ${l}%`;
+    root.style.setProperty("--primary", hsl);
     root.style.setProperty("--primary-foreground", readableOn(p));
-    root.style.setProperty("--ring", `${h} ${s}% ${l}%`);
-    root.style.setProperty("--sidebar-primary", `${h} ${s}% ${l}%`);
-    root.style.setProperty("--sidebar-primary-foreground", readableOn(p));
-    root.style.setProperty("--sidebar-ring", `${h} ${s}% ${l}%`);
+    root.style.setProperty("--ring", hsl);
+    root.style.setProperty("--bubble-out", hsl);
+    root.style.setProperty("--bubble-out-foreground", readableOn(p));
   }
   const a = accentHex ? hexToRgb(accentHex) : null;
   if (a) {
     const [h, s, l] = rgbToHsl(a);
-    root.style.setProperty("--brand-accent", `${h} ${s}% ${l}%`);
+    const hsl = `${h} ${s}% ${l}%`;
+    root.style.setProperty("--brand-accent", hsl);
     root.style.setProperty("--brand-accent-foreground", readableOn(a));
+    root.style.setProperty("--sidebar-primary", hsl);
+    root.style.setProperty("--sidebar-primary-foreground", readableOn(a));
+    root.style.setProperty("--sidebar-ring", hsl);
   }
 }

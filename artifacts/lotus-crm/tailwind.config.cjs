@@ -70,6 +70,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ["var(--app-font-sans)"],
+        arabic: ["Tajawal", "var(--app-font-sans)"],
       },
     },
   },

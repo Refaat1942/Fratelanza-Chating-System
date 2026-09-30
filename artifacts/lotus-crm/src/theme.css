@@ -1,127 +1,134 @@
 /*
  * Fratelanza design tokens — the ONLY place colours are defined.
+ * Source: "Fratelanza Print & Marketing Design Pack" (brand basics).
  *
- * All components use semantic Tailwind classes (bg-primary, text-muted-foreground,
- * border-border, …) that resolve to these variables, so the whole product is
- * re-skinned by editing this file or, at runtime, from Settings → Branding
- * (primary / accent hex → see src/lib/brand.ts).
+ *   Deep Navy  #0A1F3A   Navy Light #0F2F55   Brand Gold #D4A03A
+ *   Soft Gold  #F2D89A   Teal       #0E7490   Cyan       #22D3EE
+ *   Typography: Plus Jakarta Sans (English) · Tajawal (Arabic)
  *
- * Values are HSL triplets ("H S% L%") so Tailwind can apply opacity.
- *
- * NOTE: --primary / --brand-accent below are the app's pre-existing brand hues
- * (cyan / gold) with lightness tuned for WCAG AA contrast. Set the official
- * Fratelanza colours in Settings → Branding (or replace them here).
+ * Components only use semantic Tailwind classes (bg-primary, text-muted-foreground,
+ * border-border, bg-sidebar …) that resolve to the variables below, so the whole
+ * product is re-skinned from here — or at runtime from Settings → Branding
+ * (see src/lib/brand.ts). Values are HSL triplets so Tailwind can apply opacity.
  */
 :root {
-  --app-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif;
-  --radius: 0.625rem;
+  --app-font-sans: "Plus Jakarta Sans", "Tajawal", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 0.75rem;
 
-  /* Brand */
-  --primary: 190 80% 32%;
+  /* Brand palette (reference values) */
+  --navy: 214 71% 13%;            /* #0A1F3A */
+  --navy-light: 213 70% 20%;      /* #0F2F55 */
+  --gold: 40 64% 53%;             /* #D4A03A */
+  --soft-gold: 42 77% 78%;        /* #F2D89A */
+  --teal: 193 82% 31%;            /* #0E7490 */
+  --cyan: 188 86% 53%;            /* #22D3EE */
+
+  /* Interactive colour: Teal */
+  --primary: var(--teal);
   --primary-foreground: 0 0% 100%;
-  /* Brand accent (gold) — secondary highlights only (badges, charts). */
-  --brand-accent: 45 95% 50%;
-  --brand-accent-foreground: 222 30% 12%;
-  /* shadcn "accent" = neutral hover/selection surface, NOT the brand accent. */
-  --accent: 214 22% 93%;
-  --accent-foreground: 222 25% 14%;
+  /* Highlights: Brand Gold (badges, active marker, charts) */
+  --brand-accent: var(--gold);
+  --brand-accent-foreground: 214 71% 13%;
+  /* shadcn "accent" = neutral hover / selection surface */
+  --accent: 214 32% 93%;
+  --accent-foreground: 214 50% 13%;
 
   /* Surfaces */
-  --background: 210 20% 97.5%;
-  --foreground: 222 25% 14%;
+  --background: 214 30% 96%;
+  --foreground: 214 50% 13%;
   --card: 0 0% 100%;
-  --card-foreground: 222 25% 14%;
+  --card-foreground: 214 50% 13%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 25% 14%;
-  --muted: 214 22% 94%;
-  --muted-foreground: 215 14% 36%;
-  --secondary: 214 22% 93%;
-  --secondary-foreground: 222 25% 18%;
-  --border: 214 18% 87%;
-  --input: 214 16% 80%;
+  --popover-foreground: 214 50% 13%;
+  --muted: 214 28% 93%;
+  --muted-foreground: 214 18% 36%;
+  --secondary: 214 28% 92%;
+  --secondary-foreground: 214 50% 16%;
+  --border: 214 26% 88%;
+  --input: 214 22% 78%;
   --ring: var(--primary);
 
-  /* Sidebar */
-  --sidebar: 0 0% 100%;
-  --sidebar-foreground: 222 25% 18%;
-  --sidebar-border: 214 18% 87%;
-  --sidebar-primary: var(--primary);
-  --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: 214 22% 94%;
-  --sidebar-accent-foreground: 222 25% 14%;
-  --sidebar-ring: var(--primary);
+  /* Sidebar: Deep Navy with gold marker */
+  --sidebar: var(--navy);
+  --sidebar-foreground: 214 30% 88%;
+  --sidebar-border: 213 55% 22%;
+  --sidebar-primary: var(--gold);
+  --sidebar-primary-foreground: 214 71% 13%;
+  --sidebar-accent: var(--navy-light);
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: var(--gold);
 
   /* Status */
   --destructive: 0 72% 46%;
   --destructive-foreground: 0 0% 100%;
   --success: 152 60% 28%;
   --success-foreground: 0 0% 100%;
-  --warning: 32 92% 38%;
+  --warning: 32 92% 36%;
   --warning-foreground: 0 0% 100%;
   --info: 212 80% 42%;
   --info-foreground: 0 0% 100%;
 
   /* Inbox */
-  --bubble-out: var(--primary);
-  --bubble-out-foreground: var(--primary-foreground);
+  --bubble-out: var(--navy-light);
+  --bubble-out-foreground: 0 0% 100%;
   --bubble-in: 0 0% 100%;
-  --bubble-in-foreground: 222 25% 14%;
-  --chat-wallpaper: 210 22% 95%;
+  --bubble-in-foreground: 214 50% 13%;
+  --chat-wallpaper: 214 32% 94%;
 
   /* Charts */
-  --chart-1: var(--primary);
-  --chart-2: var(--brand-accent);
-  --chart-3: 212 70% 50%;
+  --chart-1: var(--teal);
+  --chart-2: var(--gold);
+  --chart-3: 213 60% 45%;
   --chart-4: 0 70% 52%;
-  --chart-5: 270 55% 58%;
+  --chart-5: var(--cyan);
 
-  /* Elevation (neutral, no glow) */
-  --button-outline: rgba(15, 23, 42, 0.14);
-  --badge-outline: rgba(15, 23, 42, 0.12);
-  --elevate-1: rgba(15, 23, 42, 0.04);
-  --elevate-2: rgba(15, 23, 42, 0.08);
-  --shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.06);
-  --shadow: 0 2px 6px -1px rgb(15 23 42 / 0.08), 0 1px 3px -1px rgb(15 23 42 / 0.06);
-  --shadow-lg: 0 10px 24px -6px rgb(15 23 42 / 0.14);
+  /* Elevation (navy-tinted, no glow) */
+  --button-outline: rgba(10, 31, 58, 0.16);
+  --badge-outline: rgba(10, 31, 58, 0.14);
+  --elevate-1: rgba(10, 31, 58, 0.04);
+  --elevate-2: rgba(10, 31, 58, 0.08);
+  --shadow-sm: 0 1px 2px 0 rgb(10 31 58 / 0.06);
+  --shadow: 0 2px 8px -1px rgb(10 31 58 / 0.09), 0 1px 3px -1px rgb(10 31 58 / 0.06);
+  --shadow-lg: 0 14px 32px -8px rgb(10 31 58 / 0.22);
 
   color-scheme: light;
 }
 
 .dark {
-  --primary: 190 75% 46%;
-  --primary-foreground: 222 35% 8%;
-  --brand-accent: 45 90% 55%;
-  --brand-accent-foreground: 222 35% 8%;
-  --accent: 222 16% 19%;
-  --accent-foreground: 210 20% 96%;
+  --primary: var(--cyan);
+  --primary-foreground: 214 71% 10%;
+  --brand-accent: 40 70% 58%;
+  --brand-accent-foreground: 214 71% 10%;
+  --accent: 214 45% 17%;
+  --accent-foreground: 214 30% 96%;
 
-  --background: 222 24% 8%;
-  --foreground: 210 20% 94%;
-  --card: 222 22% 11%;
-  --card-foreground: 210 20% 94%;
-  --popover: 222 22% 11%;
-  --popover-foreground: 210 20% 94%;
-  --muted: 222 16% 16%;
-  --muted-foreground: 215 14% 68%;
-  --secondary: 222 16% 18%;
-  --secondary-foreground: 210 20% 92%;
-  --border: 222 14% 22%;
-  --input: 222 14% 28%;
+  --background: 214 65% 7%;
+  --foreground: 214 30% 94%;
+  --card: 214 55% 10%;
+  --card-foreground: 214 30% 94%;
+  --popover: 214 55% 10%;
+  --popover-foreground: 214 30% 94%;
+  --muted: 214 45% 15%;
+  --muted-foreground: 214 20% 70%;
+  --secondary: 214 45% 17%;
+  --secondary-foreground: 214 30% 94%;
+  --border: 214 40% 19%;
+  --input: 214 35% 27%;
 
-  --sidebar: 222 24% 10%;
-  --sidebar-foreground: 210 20% 92%;
-  --sidebar-border: 222 14% 20%;
-  --sidebar-accent: 222 16% 17%;
-  --sidebar-accent-foreground: 210 20% 96%;
+  --sidebar: 214 72% 6%;
+  --sidebar-foreground: 214 30% 88%;
+  --sidebar-border: 214 45% 16%;
+  --sidebar-accent: 213 60% 15%;
 
   --destructive: 0 72% 58%;
   --success: 152 55% 42%;
   --warning: 36 92% 52%;
-  --info: 212 85% 62%;
+  --info: 212 85% 64%;
 
-  --bubble-in: 222 18% 17%;
-  --bubble-in-foreground: 210 20% 94%;
-  --chat-wallpaper: 222 22% 9%;
+  --bubble-out: 193 82% 26%;
+  --bubble-in: 214 45% 15%;
+  --bubble-in-foreground: 214 30% 94%;
+  --chat-wallpaper: 214 65% 8%;
 
   --button-outline: rgba(255, 255, 255, 0.16);
   --badge-outline: rgba(255, 255, 255, 0.14);

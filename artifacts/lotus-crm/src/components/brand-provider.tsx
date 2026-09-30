@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useBranding } from "@/lib/api-extra";
 import { applyBrandColors } from "@/lib/brand";
 
-const DEFAULT_TITLE = "Fratelanza Chat";
+const DEFAULT_TITLE = "Fratelanza";
 
 /**
  * Applies the admin-configured branding to the whole document: colour tokens,
@@ -13,7 +13,7 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     applyBrandColors(branding?.primaryColor, branding?.accentColor);
-    const hsl = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim();
+    const hsl = getComputedStyle(document.documentElement).getPropertyValue("--sidebar").trim();
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta && hsl) meta.setAttribute("content", `hsl(${hsl})`);
   }, [branding?.primaryColor, branding?.accentColor]);
@@ -22,7 +22,8 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
     const name = branding?.companyName?.trim() || DEFAULT_TITLE;
     const unread = /^\((\d+\+?)\)\s*/.exec(document.title)?.[0] ?? "";
     document.title = `${unread}${name}`;
-    if (branding?.logoUrl) {
+    {
+      const logo = branding?.logoUrl ?? "/favicon.png";
       let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
       if (!link) {
         link = document.createElement("link");
@@ -30,7 +31,7 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
         document.head.appendChild(link);
       }
       link.removeAttribute("type");
-      link.href = branding.logoUrl;
+      link.href = logo;
     }
   }, [branding?.companyName, branding?.logoUrl]);
 

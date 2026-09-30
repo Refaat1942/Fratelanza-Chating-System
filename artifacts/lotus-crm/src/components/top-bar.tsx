@@ -32,7 +32,7 @@ export function TopBar() {
   const { data: notReadyReasons } = useNotReadyReasons();
   const updateAvailability = useUpdateMyAvailability();
 
-  const companyName = branding?.companyName ?? "Fratelanza Chat";
+  const companyName = branding?.companyName ?? "Fratelanza";
   const name = userLabel(user);
 
   const isReady = availability?.isReady ?? true;
@@ -42,7 +42,7 @@ export function TopBar() {
 
   return (
     <header
-      className="h-14 flex-shrink-0 border-b border-border bg-card flex items-center justify-between gap-2 px-3 md:px-5 pt-safe z-10"
+      className="h-14 flex-shrink-0 border-b border-border bg-card shadow-[0_1px_0_0_hsl(var(--border))] flex items-center justify-between gap-2 px-3 md:px-5 pt-safe z-10"
       data-testid="top-bar"
     >
       <div className="flex items-center gap-2 min-w-0">

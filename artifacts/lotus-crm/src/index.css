@@ -15,6 +15,7 @@
     color: hsl(var(--foreground));
     overscroll-behavior-y: none;
   }
+  h1, h2, h3 { letter-spacing: -0.01em; }
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
@@ -65,3 +66,16 @@
 .pt-safe { padding-top: env(safe-area-inset-top); }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+
+/* Sidebar: gold marker on the active item (brand gold on Deep Navy) */
+[data-sidebar="menu-button"][data-active="true"] { position: relative; }
+[data-sidebar="menu-button"][data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 22%; bottom: 22%;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: hsl(var(--sidebar-primary));
+}
+/* Customer text may be Arabic or English: align each bubble/preview to its own script */
+.bidi { unicode-bidi: plaintext; text-align: start; }

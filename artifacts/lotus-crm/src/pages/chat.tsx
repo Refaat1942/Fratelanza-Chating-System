@@ -70,6 +70,7 @@ import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions } fr
 import { useThread, markConversationRead } from "@/lib/inbox";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { EmptyState, ErrorState } from "@/components/states";
+import { BrandLogo, BrandTagline } from "@/components/brand-logo";
 import { initials, userLabel, type AppUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useGetMe } from "@workspace/api-client-react";
@@ -259,7 +260,7 @@ export default function ChatPage() {
           )}
         </div>
 
-        <ScrollArea className="flex-1 min-h-0">
+        <ScrollArea className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block">
           {isLoading ? (
             <div className="p-4 space-y-4" aria-busy>
               {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -294,7 +295,7 @@ export default function ChatPage() {
                       aria-current={selected ? "true" : undefined}
                       className={cn(
                         "w-full text-left px-3 sm:px-4 py-3 min-h-[72px] flex gap-3 transition-colors hover:bg-muted/60",
-                        selected && "bg-muted",
+                        selected && "bg-accent shadow-[inset_3px_0_0_0_hsl(var(--brand-accent))]",
                       )}
                       data-testid={`btn-select-conv-${conv.id}`}
                     >
@@ -305,19 +306,19 @@ export default function ChatPage() {
                       </Avatar>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-baseline justify-between gap-2">
-                          <p className={cn("text-sm truncate", unread ? "font-bold" : "font-medium")}>{customerTitle(conv)}</p>
-                          <time className={cn("text-[11px] whitespace-nowrap", unread ? "text-primary font-semibold" : "text-muted-foreground")}>
+                          <p className={cn("text-sm truncate bidi", unread ? "font-bold" : "font-medium")}>{customerTitle(conv)}</p>
+                          <time className={cn("text-[11px] whitespace-nowrap", unread ? "text-foreground font-semibold" : "text-muted-foreground")}>
                             {listTime(conv.lastMessageAt)}
                           </time>
                         </div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <p className={cn("text-[13px] truncate flex-1", unread ? "text-foreground" : "text-muted-foreground")}>
+                          <p className={cn("text-[13px] truncate flex-1 bidi", unread ? "text-foreground" : "text-muted-foreground")}>
                             {conv.lastSenderType === "agent" && <span className="text-muted-foreground">You: </span>}
                             {conv.lastMessage || "No messages yet"}
                           </p>
                           {unread && (
                             <span
-                              className="min-w-5 h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold flex items-center justify-center shrink-0"
+                              className="min-w-5 h-5 px-1.5 rounded-full bg-brand-accent text-brand-accent-foreground text-[11px] font-bold flex items-center justify-center shrink-0"
                               aria-label={`${conv.unreadCount} unread`}
                             >
                               {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
@@ -366,12 +367,12 @@ export default function ChatPage() {
             showDetailsButton={!wideDetails}
           />
         ) : (
-          <EmptyState
-            className="flex-1"
-            icon={<MessageSquare className="h-12 w-12" />}
-            title="Select a conversation"
-            hint="Choose a chat from the list to read and reply."
-          />
+          <div className="flex-1 flex flex-col items-center justify-center text-center px-6 bg-wallpaper">
+            <BrandLogo name="Fratelanza" large className="h-32 w-32 opacity-95 shadow-xl ring-1 ring-border" />
+            <h3 className="mt-6 text-lg font-extrabold tracking-tight">Select a conversation</h3>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xs">Choose a chat from the list to read and reply.</p>
+            <BrandTagline className="mt-6 text-xs font-semibold tracking-wide text-muted-foreground/80" />
+          </div>
         )}
       </section>
 
@@ -737,7 +738,7 @@ function ChatCenter({
                         <span className="text-xs font-semibold text-warning">Internal note</span>
                         <time className="text-[11px] text-muted-foreground ml-auto">{format(parseISO(msg.createdAt), "h:mm a")}</time>
                       </div>
-                      <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                      <p className="text-sm whitespace-pre-wrap break-words bidi">{msg.body}</p>
                     </div>
                   </div>
                 );
@@ -752,7 +753,7 @@ function ChatCenter({
                       failed && "ring-2 ring-destructive/60",
                     )}
                   >
-                    <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.body}</p>
+                    <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] bidi">{msg.body}</p>
                     {msg.attachments && msg.attachments.length > 0 && (
                       <div className="mt-1.5 flex flex-col gap-1">
                         {msg.attachments.map((url, i) =>
@@ -1151,7 +1152,7 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
               />
             </div>
           </div>
-          <ScrollArea className="flex-1 min-h-0">
+          <ScrollArea className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block">
             <div className="p-4 space-y-3">
               {filteredReplies.map((qr) => (
                 <button

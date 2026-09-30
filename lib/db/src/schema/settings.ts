@@ -14,7 +14,7 @@ export const settingsTable = pgTable("settings", {
     .notNull()
     .default("least_busy"),
   // Branding — admin-configurable
-  companyName: text("company_name").notNull().default("Fratelanza Chat Management System"),
+  companyName: text("company_name").notNull().default("Fratelanza"),
   logoUrl: text("logo_url"),
   // Brand colours (hex, e.g. "#0a7d5a"). NULL = built-in default theme.
   primaryColor: text("primary_color"),

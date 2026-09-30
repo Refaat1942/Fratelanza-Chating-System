@@ -26,7 +26,7 @@ import { useBranding, useInsights, useMyPermissions } from "@/lib/api-extra";
 import { useInboxSync } from "@/lib/inbox";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { TopBar } from "@/components/top-bar";
-import { BrandLogo } from "@/components/brand-logo";
+import { BrandLogo, BrandTagline } from "@/components/brand-logo";
 import { cn } from "@/lib/utils";
 
 function NavLink({
@@ -35,14 +35,14 @@ function NavLink({
   label,
   active,
   badge,
-  badgeTone = "primary",
+  badgeTone = "gold",
 }: {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   active: boolean;
   badge?: number;
-  badgeTone?: "primary" | "destructive";
+  badgeTone?: "gold" | "destructive";
 }) {
   const { setOpenMobile } = useSidebar();
   return (
@@ -57,7 +57,7 @@ function NavLink({
                 "min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums flex items-center justify-center",
                 badgeTone === "destructive"
                   ? "bg-destructive text-destructive-foreground"
-                  : "bg-primary text-primary-foreground",
+                  : "bg-sidebar-primary text-sidebar-primary-foreground",
               )}
               aria-label={`${badge} unread`}
             >
@@ -82,7 +82,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   const urgentCount = insights?.summary.urgentCount ?? 0;
   const unread = sync?.unread ?? 0;
-  const companyName = branding?.companyName ?? "Fratelanza Chat";
+  const companyName = branding?.companyName ?? "Fratelanza";
   const isActive = (href: string) => location === href || location.startsWith(href + "/");
 
   // On phones an open conversation takes the whole screen (its own header + back button).
@@ -90,16 +90,19 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-app w-full overflow-hidden bg-background">
-      <Sidebar className="border-r border-border">
-        <SidebarHeader className="px-4 py-4 border-b border-border">
+      <Sidebar className="border-r border-sidebar-border">
+        <SidebarHeader className="px-4 py-4 border-b border-sidebar-border">
           <div className="flex items-center gap-3 min-w-0">
             <BrandLogo
               logoUrl={branding?.logoUrl}
               name={companyName}
-              className="h-9 w-9 shrink-0"
-              imgClassName="h-9 max-w-[140px] shrink-0"
+              className="h-11 w-11 shrink-0 ring-1 ring-white/10"
+              imgClassName="h-11 max-w-[150px] shrink-0 rounded-md bg-white p-1"
             />
-            <span className="font-semibold text-sm leading-tight truncate">{companyName}</span>
+            <div className="min-w-0">
+              <p className="font-extrabold text-[15px] leading-tight tracking-[0.14em] uppercase text-white truncate">{companyName}</p>
+              <p className="text-[10px] font-medium tracking-[0.2em] uppercase text-sidebar-foreground/60">Customer Chat</p>
+            </div>
           </div>
         </SidebarHeader>
 
@@ -134,8 +137,9 @@ function Shell({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarContent>
 
-        <SidebarFooter className="border-t border-border p-3">
+        <SidebarFooter className="border-t border-sidebar-border p-3 gap-3">
           {user?.role === "agent" && <AvailabilityToggle />}
+          <BrandTagline className="text-center text-[11px] font-medium text-[hsl(var(--soft-gold))]/80" />
         </SidebarFooter>
       </Sidebar>
 
