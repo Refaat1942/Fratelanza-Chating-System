@@ -492,6 +492,13 @@ function ChatCenter({ conversationId, currentUserId, currentUserName, message, s
                   </div>
                   <span className="text-[10px] text-muted-foreground px-1">
                     {format(parseISO(msg.createdAt), "h:mm a")}
+                    {isMe && (msg.status as string) === "failed" && (
+                      <span className="ml-1 font-semibold text-destructive">
+                        · Not delivered (WhatsApp)
+                      </span>
+                    )}
+                    {isMe && (msg.status as string) === "read" && " · Read"}
+                    {isMe && (msg.status as string) === "delivered" && " · Delivered"}
                   </span>
                 </div>
               </div>

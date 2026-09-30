@@ -5,6 +5,8 @@ import { eq, asc } from "drizzle-orm";
 import { requireAuth, AuthRequest } from "../middlewares/auth";
 import { requirePermission } from "../middlewares/permissions";
 import type { Server as IOServer } from "socket.io";
+import { logger } from "../lib/logger";
+import { sendWhatsAppText, whatsappSendingConfigured } from "../lib/whatsapp";
 
 const router = Router();
 
@@ -97,12 +99,44 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
     })
     .where(eq(conversationsTable.id, convId));
 
-  const io: IOServer = (req as AuthRequest & { app: { get: (k: string) => IOServer } }).app.get("io");
-  if (io) {
-    io.to(`conv:${convId}`).emit("new_message", message);
+  // Deliver through the WhatsApp Cloud API. Internal notes never leave the CRM.
+  // On failure the message stays in the thread flagged "failed" so the agent
+  // can see it was NOT delivered (e.g. outside the 24h customer-service window).
+  let delivered: typeof message = message;
+  let deliveryError: string | undefined;
+  if (!isNote && whatsappSendingConfigured()) {
+    const [target] = await db
+      .select({ channel: conversationsTable.channel, phone: customersTable.phone })
+      .from(conversationsTable)
+      .leftJoin(customersTable, eq(conversationsTable.customerId, customersTable.id))
+      .where(eq(conversationsTable.id, convId))
+      .limit(1);
+    if (target?.channel === "whatsapp" && target.phone) {
+      try {
+        const { externalId } = await sendWhatsAppText(target.phone, body);
+        [delivered] = await db
+          .update(messagesTable)
+          .set({ externalId })
+          .where(eq(messagesTable.id, message.id))
+          .returning();
+      } catch (err) {
+        deliveryError = err instanceof Error ? err.message : "WhatsApp send failed";
+        logger.error({ err, messageId: message.id }, "WhatsApp send failed");
+        [delivered] = await db
+          .update(messagesTable)
+          .set({ status: "failed" })
+          .where(eq(messagesTable.id, message.id))
+          .returning();
+      }
+    }
   }
 
-  res.status(201).json(message);
+  const io: IOServer = (req as AuthRequest & { app: { get: (k: string) => IOServer } }).app.get("io");
+  if (io) {
+    io.to(`conv:${convId}`).emit("new_message", delivered);
+  }
+
+  res.status(201).json(deliveryError ? { ...delivered, deliveryError } : delivered);
 });
 
 export default router;

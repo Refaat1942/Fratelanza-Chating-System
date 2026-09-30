@@ -1,3 +1,7 @@
+# Isolated compose project: its own network/volumes, cannot collide with other
+# stacks on the same VPS (the default project name would be the folder "deploy").
+name: fratelanza-chat
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -31,7 +35,16 @@ services:
       PORT: 8080
       DATABASE_URL: postgres://${POSTGRES_USER:-fratelanza}:${POSTGRES_PASSWORD:-fratelanza_dev_password_change_me}@postgres:5432/${POSTGRES_DB:-fratelanza}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - set it in .env}
-      RUN_SEED: ${RUN_SEED:-true}
+      RUN_SEED: ${RUN_SEED:-false}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v22.0}
     networks:
       - lotus_net
 
@@ -44,7 +57,9 @@ services:
     depends_on:
       - api
     ports:
-      - "${WEB_PORT:-8090}:80"
+      # Loopback only by default: put HTTPS (nginx/Caddy) in front. Set
+      # WEB_BIND=0.0.0.0 only for a short plain-HTTP test.
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-17156}:80"
     networks:
       - lotus_net
 

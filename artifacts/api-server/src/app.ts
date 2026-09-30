@@ -30,7 +30,16 @@ app.use(
 app.use(cors());
 // Bumped from default 100kb so branding logo data-URLs (up to ~700KB
 // after base64 encoding) can be saved via PUT /api/settings.
-app.use(express.json({ limit: "2mb" }));
+// `verify` keeps the untouched request bytes: Meta's X-Hub-Signature-256 is an
+// HMAC of the raw body, so it cannot be checked against re-serialised JSON.
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
 app.use("/api", router);
