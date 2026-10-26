@@ -29,7 +29,39 @@ export interface ActiveCustomer {
   lastSeenAt: string | null;
 }
 
+export interface AgeBucket {
+  bucket: "today" | "1-3" | "4-7" | "8-30" | "30+";
+  count: number;
+}
+
+export interface TopicAging {
+  topicId: number | null;
+  name: string;
+  color: string;
+  total: number;
+  active: number;
+  waitingOnUs: number;
+  avgDaysSinceLast: number;
+}
+
+export interface OldestWaiting {
+  conversationId: number;
+  customerName: string;
+  phone: string;
+  lastMessage: string;
+  lastMessageAt: string | null;
+  topic: string | null;
+  topicColor: string | null;
+  daysWaiting: number;
+}
+
 export interface InsightsResponse {
+  aging?: {
+    waitingOnUs: AgeBucket[];
+    waitingOnCustomer: AgeBucket[];
+    byTopic: TopicAging[];
+    oldestWaiting: OldestWaiting[];
+  };
   slaMinutes: number;
   summary: {
     unrepliedCount: number;
@@ -55,6 +87,8 @@ export function useInsights() {
 export interface Branding {
   companyName: string;
   logoUrl: string | null;
+  primaryColor?: string | null;
+  accentColor?: string | null;
 }
 
 export function useBranding() {
@@ -401,6 +435,7 @@ export interface ChatReason {
   createdAt: string;
   categoryTitleEn?: string | null;
   categoryTitleAr?: string | null;
+  keywords?: string[];
 }
 
 export function useChatReasons() {
@@ -413,7 +448,7 @@ export function useChatReasons() {
 export function useCreateChatReason() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { nameEn: string; nameAr: string; color: string; categoryId: number | null }) =>
+    mutationFn: (data: { nameEn: string; nameAr: string; color: string; categoryId: number | null; keywords?: string[] }) =>
       customFetch<ChatReason>("/api/chat-reasons", { method: "POST", body: JSON.stringify(data) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/chat-reasons"] }),
   });
@@ -422,7 +457,7 @@ export function useCreateChatReason() {
 export function useUpdateChatReason() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; nameEn?: string; nameAr?: string; color?: string; categoryId?: number | null }) =>
+    mutationFn: ({ id, ...data }: { id: number; nameEn?: string; nameAr?: string; color?: string; categoryId?: number | null; keywords?: string[]; isActive?: boolean }) =>
       customFetch<ChatReason>(`/api/chat-reasons/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/chat-reasons"] }),
   });
@@ -512,3 +547,52 @@ export function useUpdateMyAvailability() {
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Server capabilities + bulk inbox actions + topic re-filing
+// ---------------------------------------------------------------------------
+export interface SystemStatus {
+  outboundEnabled: boolean;
+}
+
+export function useSystemStatus() {
+  return useQuery({
+    queryKey: ["/api/system"],
+    queryFn: () => customFetch<SystemStatus>("/api/system"),
+    staleTime: 60_000,
+  });
+}
+
+export type BulkAction =
+  | { action: "topic"; value: number | null }
+  | { action: "addTag" | "removeTag"; value: string }
+  | { action: "status"; value: "open" | "pending" | "completed" }
+  | { action: "read" | "assignMe"; value?: undefined };
+
+export function useBulkConversations() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ids, ...a }: { ids: number[] } & BulkAction) =>
+      customFetch<{ updated: number; skipped: number }>("/api/conversations/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, ...a }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["/api/conversations"] });
+      void qc.invalidateQueries({ queryKey: ["/api/inbox/sync"] });
+      void qc.invalidateQueries({ queryKey: ["/api/insights"] });
+    },
+  });
+}
+
+export function useReclassifyTopics() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => customFetch<{ checked: number; filed: number }>("/api/chat-reasons/reclassify", { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["/api/conversations"] });
+      void qc.invalidateQueries({ queryKey: ["/api/insights"] });
+    },
+  });
+}

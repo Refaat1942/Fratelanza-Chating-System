@@ -51,11 +51,11 @@ export function AvailabilityToggle() {
         <button
           type="button"
           disabled={mutation.isPending}
-          className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 text-xs hover:bg-accent transition-colors disabled:opacity-50"
+          className="w-full flex items-center gap-2 rounded-lg border border-sidebar-border bg-white/5 px-3 py-2 text-xs font-medium text-sidebar-foreground hover:bg-white/10 transition-colors disabled:opacity-50"
           data-testid="button-availability"
         >
           <span className={`h-2 w-2 rounded-full ring-2 ${meta.dot} ${meta.ring}`} />
-          <span className="text-foreground">{meta.label}</span>
+          <span>{meta.label}</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-40">

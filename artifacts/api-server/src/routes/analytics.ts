@@ -12,7 +12,10 @@ import { requirePermission } from "../middlewares/permissions";
 
 const router = Router();
 
-router.use(requireAuth, requirePermission("canViewReports"));
+// Scope to the reporting endpoints only. (A bare router.use() here used to apply to EVERY route
+// registered after this router: /branding was login-protected and /me, /insights, /settings
+// required the reports permission, which agents do not have.)
+router.use(["/analytics", "/reports"], requireAuth, requirePermission("canViewReports"));
 
 // ----- helpers -----
 type DateRange = { from: Date; to: Date };

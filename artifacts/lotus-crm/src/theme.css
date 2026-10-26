@@ -1,0 +1,138 @@
+/*
+ * Fratelanza design tokens — the ONLY place colours are defined.
+ * Source: "Fratelanza Print & Marketing Design Pack" (brand basics).
+ *
+ *   Deep Navy  #0A1F3A   Navy Light #0F2F55   Brand Gold #D4A03A
+ *   Soft Gold  #F2D89A   Teal       #0E7490   Cyan       #22D3EE
+ *   Typography: Plus Jakarta Sans (English) · Tajawal (Arabic)
+ *
+ * Components only use semantic Tailwind classes (bg-primary, text-muted-foreground,
+ * border-border, bg-sidebar …) that resolve to the variables below, so the whole
+ * product is re-skinned from here — or at runtime from Settings → Branding
+ * (see src/lib/brand.ts). Values are HSL triplets so Tailwind can apply opacity.
+ */
+:root {
+  --app-font-sans: "Plus Jakarta Sans", "Tajawal", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 0.75rem;
+
+  /* Brand palette (reference values) */
+  --navy: 214 71% 13%;            /* #0A1F3A */
+  --navy-light: 213 70% 20%;      /* #0F2F55 */
+  --gold: 40 64% 53%;             /* #D4A03A */
+  --soft-gold: 42 77% 78%;        /* #F2D89A */
+  --teal: 193 82% 31%;            /* #0E7490 */
+  --cyan: 188 86% 53%;            /* #22D3EE */
+
+  /* Interactive colour: Teal */
+  --primary: var(--teal);
+  --primary-foreground: 0 0% 100%;
+  /* Highlights: Brand Gold (badges, active marker, charts) */
+  --brand-accent: var(--gold);
+  --brand-accent-foreground: 214 71% 13%;
+  /* shadcn "accent" = neutral hover / selection surface */
+  --accent: 214 32% 93%;
+  --accent-foreground: 214 50% 13%;
+
+  /* Surfaces */
+  --background: 214 30% 96%;
+  --foreground: 214 50% 13%;
+  --card: 0 0% 100%;
+  --card-foreground: 214 50% 13%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 214 50% 13%;
+  --muted: 214 28% 93%;
+  --muted-foreground: 214 18% 36%;
+  --secondary: 214 28% 92%;
+  --secondary-foreground: 214 50% 16%;
+  --border: 214 26% 88%;
+  --input: 214 22% 78%;
+  --ring: var(--primary);
+
+  /* Sidebar: Deep Navy with gold marker */
+  --sidebar: var(--navy);
+  --sidebar-foreground: 214 30% 88%;
+  --sidebar-border: 213 55% 22%;
+  --sidebar-primary: var(--gold);
+  --sidebar-primary-foreground: 214 71% 13%;
+  --sidebar-accent: var(--navy-light);
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: var(--gold);
+
+  /* Status */
+  --destructive: 0 72% 46%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 60% 28%;
+  --success-foreground: 0 0% 100%;
+  --warning: 32 92% 36%;
+  --warning-foreground: 0 0% 100%;
+  --info: 212 80% 42%;
+  --info-foreground: 0 0% 100%;
+
+  /* Inbox */
+  --bubble-out: var(--navy-light);
+  --bubble-out-foreground: 0 0% 100%;
+  --bubble-in: 0 0% 100%;
+  --bubble-in-foreground: 214 50% 13%;
+  --chat-wallpaper: 214 32% 94%;
+
+  /* Charts */
+  --chart-1: var(--teal);
+  --chart-2: var(--gold);
+  --chart-3: 213 60% 45%;
+  --chart-4: 0 70% 52%;
+  --chart-5: var(--cyan);
+
+  /* Elevation (navy-tinted, no glow) */
+  --button-outline: rgba(10, 31, 58, 0.16);
+  --badge-outline: rgba(10, 31, 58, 0.14);
+  --elevate-1: rgba(10, 31, 58, 0.04);
+  --elevate-2: rgba(10, 31, 58, 0.08);
+  --shadow-sm: 0 1px 2px 0 rgb(10 31 58 / 0.06);
+  --shadow: 0 2px 8px -1px rgb(10 31 58 / 0.09), 0 1px 3px -1px rgb(10 31 58 / 0.06);
+  --shadow-lg: 0 14px 32px -8px rgb(10 31 58 / 0.22);
+
+  color-scheme: light;
+}
+
+.dark {
+  --primary: var(--cyan);
+  --primary-foreground: 214 71% 10%;
+  --brand-accent: 40 70% 58%;
+  --brand-accent-foreground: 214 71% 10%;
+  --accent: 214 45% 17%;
+  --accent-foreground: 214 30% 96%;
+
+  --background: 214 65% 7%;
+  --foreground: 214 30% 94%;
+  --card: 214 55% 10%;
+  --card-foreground: 214 30% 94%;
+  --popover: 214 55% 10%;
+  --popover-foreground: 214 30% 94%;
+  --muted: 214 45% 15%;
+  --muted-foreground: 214 20% 70%;
+  --secondary: 214 45% 17%;
+  --secondary-foreground: 214 30% 94%;
+  --border: 214 40% 19%;
+  --input: 214 35% 27%;
+
+  --sidebar: 214 72% 6%;
+  --sidebar-foreground: 214 30% 88%;
+  --sidebar-border: 214 45% 16%;
+  --sidebar-accent: 213 60% 15%;
+
+  --destructive: 0 72% 58%;
+  --success: 152 55% 42%;
+  --warning: 36 92% 52%;
+  --info: 212 85% 64%;
+
+  --bubble-out: 193 82% 26%;
+  --bubble-in: 214 45% 15%;
+  --bubble-in-foreground: 214 30% 94%;
+  --chat-wallpaper: 214 65% 8%;
+
+  --button-outline: rgba(255, 255, 255, 0.16);
+  --badge-outline: rgba(255, 255, 255, 0.14);
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.08);
+  color-scheme: dark;
+}

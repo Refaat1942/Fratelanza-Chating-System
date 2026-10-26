@@ -88,6 +88,10 @@ export async function bootstrapSeed(): Promise<void> {
   try {
     // 1) Settings singleton
     await db.insert(settingsTable).values({ id: 1 }).onConflictDoNothing();
+    // Rebrand the stock name only — a name an admin chose is never touched.
+    await db.execute(
+      sql`UPDATE settings SET company_name = 'Fratelanza' WHERE company_name = 'Fratelanza Chat Management System'`,
+    );
 
     // 2) Demo data is NEVER seeded in production unless explicitly enabled.
     //    Default credentials (admin123 / agent123) would otherwise create

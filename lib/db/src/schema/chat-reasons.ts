@@ -10,6 +10,9 @@ export const chatReasonsTable = pgTable("chat_reasons", {
     onDelete: "set null",
   }),
   isActive: boolean("is_active").notNull().default(true),
+  // Words/phrases (English or Arabic) that put a conversation in this topic
+  // automatically. Empty = manual-only topic.
+  keywords: text("keywords").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

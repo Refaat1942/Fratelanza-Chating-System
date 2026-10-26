@@ -7,6 +7,7 @@ import {
   executeCampaignSend,
   createCampaignRecipients,
 } from "../lib/campaign-sender";
+import { outboundEnabled, OUTBOUND_DISABLED_ERROR } from "../lib/outbound";
 
 const router = Router();
 
@@ -91,6 +92,10 @@ router.delete("/campaigns/:id", requireAuth, requireAdmin, async (req, res) => {
 });
 
 router.post("/campaigns/:id/send", requireAuth, requireAdmin, async (req, res) => {
+  if (!outboundEnabled()) {
+    res.status(403).json(OUTBOUND_DISABLED_ERROR);
+    return;
+  }
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "invalid id" });

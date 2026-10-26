@@ -7,6 +7,8 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
+// host nginx -> web (nginx) container -> api: trust both hops so req.ip is the real client.
+app.set("trust proxy", 2);
 
 app.use(
   pinoHttp({

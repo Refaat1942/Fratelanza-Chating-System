@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -28,6 +28,9 @@ export const conversationsTable = pgTable("conversations", {
   }),
   unreadCount: integer("unread_count").notNull().default(0),
   chatReasonId: integer("chat_reason_id"),
+  // true = topic was picked by the keyword classifier (it may re-file the chat);
+  // false = a person chose it, so automation never overrides it.
+  chatReasonAuto: boolean("chat_reason_auto").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
   queuedAt: timestamp("queued_at"),

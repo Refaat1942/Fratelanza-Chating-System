@@ -14,10 +14,15 @@ export const settingsTable = pgTable("settings", {
     .notNull()
     .default("least_busy"),
   // Branding — admin-configurable
-  companyName: text("company_name").notNull().default("Fratelanza Chat Management System"),
+  companyName: text("company_name").notNull().default("Fratelanza"),
   logoUrl: text("logo_url"),
+  // Brand colours (hex, e.g. "#0a7d5a"). NULL = built-in default theme.
+  primaryColor: text("primary_color"),
+  accentColor: text("accent_color"),
   // SLA threshold (in minutes) used for chat-monitoring "Late" status
   slaMinutes: integer("sla_minutes").notNull().default(15),
+  // Default content topics are inserted once; afterwards the admin owns them.
+  topicsSeeded: boolean("topics_seeded").notNull().default(false),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

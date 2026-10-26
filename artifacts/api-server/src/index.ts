@@ -9,10 +9,16 @@ import { logger } from "./lib/logger";
 import { bootstrapSeed } from "./lib/bootstrap-seed";
 import { JWT_SECRET } from "./middlewares/auth";
 import { processDueScheduledCampaigns } from "./lib/campaign-sender";
+import { bootTopics } from "./lib/topics";
 
 interface AuthedSocket extends Socket {
   data: { userId: number; role: "admin" | "agent" };
 }
+
+// A failed fire-and-forget background task must never take the whole API down.
+process.on("unhandledRejection", (reason) => {
+  logger.error({ err: reason }, "Unhandled promise rejection");
+});
 
 const rawPort = process.env["PORT"];
 
@@ -52,10 +58,10 @@ io.use(async (socket, next) => {
     if (!token) return next(new Error("Unauthorized"));
     const payload = jwt.verify(token, JWT_SECRET) as { userId: number };
     const [user] = await db
-      .select({ id: usersTable.id, role: usersTable.role })
+      .select({ id: usersTable.id, role: usersTable.role, isActive: usersTable.isActive })
       .from(usersTable)
       .where(eq(usersTable.id, payload.userId));
-    if (!user) return next(new Error("Unauthorized"));
+    if (!user || !user.isActive) return next(new Error("Unauthorized"));
     (socket as AuthedSocket).data = { userId: user.id, role: user.role };
     next();
   } catch {
@@ -74,10 +80,9 @@ async function canAccessConversation(
     .from(conversationsTable)
     .where(eq(conversationsTable.id, conversationId));
   if (!conv) return false;
-  // Aligned with HTTP policy: agents may only access conversations that are
-  // explicitly assigned to them. Unassigned rooms are admin-only over the
-  // socket; agents must claim via POST /conversations/:id/assign first.
-  return conv.assignedAgentId === userId;
+  // Aligned with the HTTP read policy: agents may follow their own chats and
+  // unassigned (queued) ones; sending still requires claiming the chat.
+  return conv.assignedAgentId === null || conv.assignedAgentId === userId;
 }
 
 io.on("connection", (rawSocket) => {
@@ -144,6 +149,7 @@ io.on("connection", (rawSocket) => {
 httpServer.listen(port, async () => {
   logger.info({ port }, "Server listening");
   await bootstrapSeed();
+  void bootTopics(); // seed default topics once + file existing chats (background)
   setInterval(() => {
     void processDueScheduledCampaigns().catch((err) =>
       logger.error({ err }, "Scheduled campaign processor failed"),

@@ -115,7 +115,7 @@ export function NotificationsBell() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="text-sm font-medium truncate">
-                            {it.customerName ?? "Unknown patient"}
+                            {it.customerName ?? "Unknown customer"}
                           </p>
                           {it.lastMessageAt && (
                             <span className="text-[10px] text-muted-foreground whitespace-nowrap">

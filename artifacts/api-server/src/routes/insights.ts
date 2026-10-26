@@ -164,7 +164,92 @@ router.get("/insights", requireAuth, async (req: AuthRequest, res) => {
     if (r.channel) channelCounts[r.channel] = Number(r.count ?? 0);
   }
 
+  // 5) Chat age — how many days since the last message, split by who owes a reply
+  const ageRows = await db.execute(sql`
+    SELECT
+      CASE WHEN c.last_sender_type = 'customer' THEN 'us' ELSE 'customer' END AS waiting_on,
+      CASE
+        WHEN d < 1 THEN 'today'
+        WHEN d < 4 THEN '1-3'
+        WHEN d < 8 THEN '4-7'
+        WHEN d < 31 THEN '8-30'
+        ELSE '30+'
+      END AS bucket,
+      COUNT(*)::int AS count
+    FROM (
+      SELECT c.*, EXTRACT(EPOCH FROM (NOW() - c.last_message_at)) / 86400 AS d
+      FROM conversations c
+      WHERE c.status <> 'completed' AND c.last_message_at IS NOT NULL ${agentScope}
+    ) c
+    GROUP BY 1, 2
+  `);
+  const BUCKETS = ["today", "1-3", "4-7", "8-30", "30+"] as const;
+  const emptyBuckets = () => BUCKETS.map((b) => ({ bucket: b, count: 0 }));
+  const waitingOnUs = emptyBuckets();
+  const waitingOnCustomer = emptyBuckets();
+  for (const row of ageRows.rows) {
+    const r = row as { waiting_on: string; bucket: string; count: number };
+    const list = r.waiting_on === "us" ? waitingOnUs : waitingOnCustomer;
+    const slot = list.find((x) => x.bucket === r.bucket);
+    if (slot) slot.count = Number(r.count);
+  }
+
+  const topicRows = await db.execute(sql`
+    SELECT
+      cr.id AS topic_id,
+      COALESCE(cr.name_en, 'Unsorted') AS name,
+      COALESCE(cr.color, '#94A3B8') AS color,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE c.status <> 'completed')::int AS active,
+      COUNT(*) FILTER (WHERE c.status <> 'completed' AND c.last_sender_type = 'customer')::int AS waiting_on_us,
+      COALESCE(AVG(EXTRACT(EPOCH FROM (NOW() - c.last_message_at)) / 86400)
+        FILTER (WHERE c.status <> 'completed'), 0) AS avg_days
+    FROM conversations c
+    LEFT JOIN chat_reasons cr ON cr.id = c.chat_reason_id
+    WHERE c.last_message_at IS NOT NULL ${agentScope}
+    GROUP BY cr.id, cr.name_en, cr.color
+    ORDER BY active DESC, total DESC
+  `);
+  const byTopic = topicRows.rows.map((row) => {
+    const r = row as Record<string, string | number | null>;
+    return {
+      topicId: r.topic_id === null ? null : Number(r.topic_id),
+      name: String(r.name),
+      color: String(r.color),
+      total: Number(r.total),
+      active: Number(r.active),
+      waitingOnUs: Number(r.waiting_on_us),
+      avgDaysSinceLast: Math.round(Number(r.avg_days) * 10) / 10,
+    };
+  });
+
+  const oldestRows = await db.execute(sql`
+    SELECT c.id, cu.name AS customer_name, cu.phone, c.last_message, c.last_message_at,
+           cr.name_en AS topic, cr.color AS topic_color,
+           EXTRACT(EPOCH FROM (NOW() - c.last_message_at)) / 86400 AS days
+    FROM conversations c
+    JOIN customers cu ON cu.id = c.customer_id
+    LEFT JOIN chat_reasons cr ON cr.id = c.chat_reason_id
+    WHERE c.status <> 'completed' AND c.last_sender_type = 'customer' AND c.last_message_at IS NOT NULL ${agentScope}
+    ORDER BY c.last_message_at ASC
+    LIMIT 10
+  `);
+  const oldestWaiting = oldestRows.rows.map((row) => {
+    const r = row as Record<string, string | number | Date | null>;
+    return {
+      conversationId: Number(r.id),
+      customerName: String(r.customer_name),
+      phone: String(r.phone ?? ""),
+      lastMessage: r.last_message ? String(r.last_message) : "",
+      lastMessageAt: r.last_message_at instanceof Date ? r.last_message_at.toISOString() : r.last_message_at ? String(r.last_message_at) : null,
+      topic: r.topic ? String(r.topic) : null,
+      topicColor: r.topic_color ? String(r.topic_color) : null,
+      daysWaiting: Math.floor(Number(r.days)),
+    };
+  });
+
   res.json({
+    aging: { waitingOnUs, waitingOnCustomer, byTopic, oldestWaiting },
     slaMinutes,
     summary: {
       unrepliedCount: unrepliedChats.length,

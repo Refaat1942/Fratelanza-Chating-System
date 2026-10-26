@@ -168,7 +168,7 @@ export async function tryAutoAssign(
         .update(conversationsTable)
         .set({
           status: "pending",
-          queuedAt: conv.queued_at ?? new Date(),
+          queuedAt: conv.queued_at ? new Date(conv.queued_at) : new Date(),
         })
         .where(eq(conversationsTable.id, conversationId));
       return { agentId: null, queued: true };
@@ -189,7 +189,7 @@ export async function tryAutoAssign(
         .update(conversationsTable)
         .set({
           status: "pending",
-          queuedAt: conv.queued_at ?? new Date(),
+          queuedAt: conv.queued_at ? new Date(conv.queued_at) : new Date(),
         })
         .where(eq(conversationsTable.id, conversationId));
       return { agentId: null, queued: true };

@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { messagesTable, conversationsTable, customersTable } from "@workspace/db";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and, gt } from "drizzle-orm";
 import { requireAuth, AuthRequest } from "../middlewares/auth";
 import { requirePermission } from "../middlewares/permissions";
 import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { sendWhatsAppText, whatsappSendingConfigured } from "../lib/whatsapp";
+import { outboundEnabled, OUTBOUND_DISABLED_ERROR } from "../lib/outbound";
 
 const router = Router();
 
@@ -20,14 +21,30 @@ async function canAccessConversation(userId: number, role: string, convId: numbe
   return !!conv && conv.assignedAgentId === userId;
 }
 
+// Agents may READ an unassigned (queued) chat so they can decide to claim it.
+async function canReadConversation(userId: number, role: string, convId: number): Promise<boolean> {
+  if (role === "admin") return true;
+  const [conv] = await db
+    .select({ assignedAgentId: conversationsTable.assignedAgentId })
+    .from(conversationsTable)
+    .where(eq(conversationsTable.id, convId))
+    .limit(1);
+  return !!conv && (conv.assignedAgentId === null || conv.assignedAgentId === userId);
+}
+
 router.get("/conversations/:id/messages", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
   const convId = Number(req.params.id);
-  const allowed = await canAccessConversation(req.user!.id, req.user!.role, convId);
+  const allowed = await canReadConversation(req.user!.id, req.user!.role, convId);
   if (!allowed) { res.status(403).json({ error: "Forbidden" }); return; }
 
+  // ?afterId=N returns only newer messages (cheap incremental polling).
+  const afterId = Number(req.query["afterId"]);
+  const where = Number.isInteger(afterId) && afterId > 0
+    ? and(eq(messagesTable.conversationId, convId), gt(messagesTable.id, afterId))
+    : eq(messagesTable.conversationId, convId);
   const messages = await db.select().from(messagesTable)
-    .where(eq(messagesTable.conversationId, convId))
-    .orderBy(asc(messagesTable.createdAt));
+    .where(where)
+    .orderBy(asc(messagesTable.createdAt), asc(messagesTable.id));
   res.json(messages);
 });
 
@@ -39,6 +56,13 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
   const { body, isNote, attachments } = req.body;
   if (!body) {
     res.status(400).json({ error: "body required" });
+    return;
+  }
+
+  // Kill switch: nothing leaves this server for a customer unless the owner
+  // turned sending on (WHATSAPP_SENDING_ENABLED=true). Notes are always fine.
+  if (!isNote && !outboundEnabled()) {
+    res.status(403).json(OUTBOUND_DISABLED_ERROR);
     return;
   }
 
@@ -89,22 +113,27 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
     senderType === "agent" &&
     current?.status === "open";
 
-  await db
-    .update(conversationsTable)
-    .set({
-      lastMessage: body,
-      lastMessageAt: new Date(),
-      lastSenderType: senderType,
-      ...(shouldFlipToPending ? { status: "pending" as const } : {}),
-    })
-    .where(eq(conversationsTable.id, convId));
+  // Internal notes are invisible to the customer, so they must not change the
+  // chat's "last message", who spoke last, or its age — otherwise a note would
+  // make an unanswered customer look answered.
+  if (!isNote) {
+    await db
+      .update(conversationsTable)
+      .set({
+        lastMessage: body,
+        lastMessageAt: new Date(),
+        lastSenderType: senderType,
+        ...(shouldFlipToPending ? { status: "pending" as const } : {}),
+      })
+      .where(eq(conversationsTable.id, convId));
+  }
 
   // Deliver through the WhatsApp Cloud API. Internal notes never leave the CRM.
   // On failure the message stays in the thread flagged "failed" so the agent
   // can see it was NOT delivered (e.g. outside the 24h customer-service window).
   let delivered: typeof message = message;
   let deliveryError: string | undefined;
-  if (!isNote && whatsappSendingConfigured()) {
+  if (!isNote && outboundEnabled() && whatsappSendingConfigured()) {
     const [target] = await db
       .select({ channel: conversationsTable.channel, phone: customersTable.phone })
       .from(conversationsTable)
@@ -134,6 +163,7 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
   const io: IOServer = (req as AuthRequest & { app: { get: (k: string) => IOServer } }).app.get("io");
   if (io) {
     io.to(`conv:${convId}`).emit("new_message", delivered);
+    io.emit("conversation_updated", { conversationId: convId });
   }
 
   res.status(201).json(deliveryError ? { ...delivered, deliveryError } : delivered);
