@@ -5,6 +5,7 @@ import {
   customersTable,
 } from "@workspace/db";
 import { eq, inArray, sql } from "drizzle-orm";
+import { outboundEnabled } from "./outbound";
 
 function personalize(template: string, customer: { name: string }) {
   return template.replace(/\{\{name\}\}/gi, customer.name);
@@ -49,6 +50,7 @@ async function deliverToCustomer(
 }
 
 export async function executeCampaignSend(campaignId: number) {
+  if (!outboundEnabled()) throw new Error("Sending to customers is turned off on this server");
   const [campaign] = await db
     .select()
     .from(campaignsTable)
@@ -138,6 +140,8 @@ export async function executeCampaignSend(campaignId: number) {
 }
 
 export async function processDueScheduledCampaigns() {
+  // Scheduled campaigns wait (stay "scheduled") while sending is off.
+  if (!outboundEnabled()) return;
   const due = await db
     .select()
     .from(campaignsTable)

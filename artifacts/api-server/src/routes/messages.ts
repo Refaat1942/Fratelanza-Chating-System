@@ -7,6 +7,7 @@ import { requirePermission } from "../middlewares/permissions";
 import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { sendWhatsAppText, whatsappSendingConfigured } from "../lib/whatsapp";
+import { outboundEnabled, OUTBOUND_DISABLED_ERROR } from "../lib/outbound";
 
 const router = Router();
 
@@ -58,6 +59,13 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
     return;
   }
 
+  // Kill switch: nothing leaves this server for a customer unless the owner
+  // turned sending on (WHATSAPP_SENDING_ENABLED=true). Notes are always fine.
+  if (!isNote && !outboundEnabled()) {
+    res.status(403).json(OUTBOUND_DISABLED_ERROR);
+    return;
+  }
+
   // Block guard: if the customer attached to this conversation is blocked,
   // refuse outbound messages but still allow internal notes (so staff can
   // record the reason / context without contacting the customer).
@@ -105,22 +113,27 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
     senderType === "agent" &&
     current?.status === "open";
 
-  await db
-    .update(conversationsTable)
-    .set({
-      lastMessage: body,
-      lastMessageAt: new Date(),
-      lastSenderType: senderType,
-      ...(shouldFlipToPending ? { status: "pending" as const } : {}),
-    })
-    .where(eq(conversationsTable.id, convId));
+  // Internal notes are invisible to the customer, so they must not change the
+  // chat's "last message", who spoke last, or its age — otherwise a note would
+  // make an unanswered customer look answered.
+  if (!isNote) {
+    await db
+      .update(conversationsTable)
+      .set({
+        lastMessage: body,
+        lastMessageAt: new Date(),
+        lastSenderType: senderType,
+        ...(shouldFlipToPending ? { status: "pending" as const } : {}),
+      })
+      .where(eq(conversationsTable.id, convId));
+  }
 
   // Deliver through the WhatsApp Cloud API. Internal notes never leave the CRM.
   // On failure the message stays in the thread flagged "failed" so the agent
   // can see it was NOT delivered (e.g. outside the 24h customer-service window).
   let delivered: typeof message = message;
   let deliveryError: string | undefined;
-  if (!isNote && whatsappSendingConfigured()) {
+  if (!isNote && outboundEnabled() && whatsappSendingConfigured()) {
     const [target] = await db
       .select({ channel: conversationsTable.channel, phone: customersTable.phone })
       .from(conversationsTable)

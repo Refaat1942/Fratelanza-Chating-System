@@ -18,6 +18,7 @@ async function getConversationWithRelations(id: number) {
     channel: conversationsTable.channel,
     tags: conversationsTable.tags,
     chatReasonId: conversationsTable.chatReasonId,
+    chatReasonAuto: conversationsTable.chatReasonAuto,
     lastMessage: conversationsTable.lastMessage,
     lastMessageAt: conversationsTable.lastMessageAt,
     lastSenderType: conversationsTable.lastSenderType,
@@ -61,6 +62,7 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
     channel: conversationsTable.channel,
     tags: conversationsTable.tags,
     chatReasonId: conversationsTable.chatReasonId,
+    chatReasonAuto: conversationsTable.chatReasonAuto,
     lastMessage: conversationsTable.lastMessage,
     lastMessageAt: conversationsTable.lastMessageAt,
     lastSenderType: conversationsTable.lastSenderType,
@@ -123,7 +125,8 @@ router.get("/inbox/sync", requireAuth, requirePermission("canViewChats"), async 
       COALESCE(SUM(unread_count), 0)::int AS unread,
       COALESCE(SUM(hashtext(
         id::text || ':' || status || ':' || COALESCE(assigned_agent_id::text, '-') || ':' ||
-        unread_count::text || ':' || COALESCE(extract(epoch FROM last_message_at)::text, '-')
+        unread_count::text || ':' || COALESCE(extract(epoch FROM last_message_at)::text, '-') || ':' ||
+        COALESCE(chat_reason_id::text, '-') || ':' || array_to_string(tags, ',')
       )::bigint), 0)::text AS version
     FROM conversations ${scope}
   `);
@@ -145,6 +148,69 @@ router.post("/conversations/:id/read", requireAuth, requirePermission("canViewCh
     await db.update(conversationsTable).set({ unreadCount: 0 }).where(eq(conversationsTable.id, id));
   }
   res.json({ ok: true });
+});
+
+// Bulk actions on many chats at once (multi-select in the inbox).
+// Agents may only change chats assigned to them (or claim unassigned ones).
+router.post("/conversations/bulk", requireAuth, requirePermission("canSendMessages"), async (req: AuthRequest, res) => {
+  const { ids, action, value } = req.body ?? {};
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 500 || !ids.every((i) => Number.isInteger(i) && i > 0)) {
+    res.status(400).json({ error: "ids must be 1-500 conversation ids" });
+    return;
+  }
+  const user = req.user!;
+  const isAdmin = user.role === "admin";
+  const idList = sql.join((ids as number[]).map((i) => sql`${i}`), sql`, `);
+  const scope = isAdmin
+    ? sql``
+    : action === "assignMe"
+      ? sql` AND assigned_agent_id IS NULL`
+      : sql` AND assigned_agent_id = ${user.id}`;
+
+  let result;
+  switch (action) {
+    case "topic": {
+      if (value !== null && !(Number.isInteger(value) && value > 0)) {
+        res.status(400).json({ error: "value must be a topic id or null" });
+        return;
+      }
+      result = await db.execute(sql`UPDATE conversations SET chat_reason_id = ${value}, chat_reason_auto = false WHERE id IN (${idList})${scope}`);
+      break;
+    }
+    case "addTag":
+    case "removeTag": {
+      const tag = typeof value === "string" ? value.trim().slice(0, 40) : "";
+      if (!tag) { res.status(400).json({ error: "value must be a list/tag name" }); return; }
+      result = action === "addTag"
+        ? await db.execute(sql`UPDATE conversations SET tags = array_append(tags, ${tag}) WHERE id IN (${idList}) AND NOT (${tag} = ANY(tags))${scope}`)
+        : await db.execute(sql`UPDATE conversations SET tags = array_remove(tags, ${tag}) WHERE id IN (${idList})${scope}`);
+      break;
+    }
+    case "status": {
+      if (!["open", "pending", "completed"].includes(value)) {
+        res.status(400).json({ error: "value must be open, pending or completed" });
+        return;
+      }
+      result = value === "completed"
+        ? await db.execute(sql`UPDATE conversations SET status = 'completed', resolved_at = NOW() WHERE id IN (${idList})${scope}`)
+        : await db.execute(sql`UPDATE conversations SET status = ${value} WHERE id IN (${idList})${scope}`);
+      break;
+    }
+    case "read":
+      result = await db.execute(sql`UPDATE conversations SET unread_count = 0 WHERE id IN (${idList})${scope}`);
+      break;
+    case "assignMe":
+      result = await db.execute(sql`UPDATE conversations SET assigned_agent_id = ${user.id}, queued_at = NULL WHERE id IN (${idList})${scope}`);
+      break;
+    default:
+      res.status(400).json({ error: "Unknown action" });
+      return;
+  }
+  const updated = Number((result as { rowCount?: number | null }).rowCount ?? 0);
+  const io = req.app.get("io") as IOServer | undefined;
+  io?.emit("conversation_updated", { conversationId: 0 });
+  if (action === "status" && value === "completed") void drainQueue(io);
+  res.json({ updated, skipped: ids.length - updated });
 });
 
 router.post("/conversations", requireAuth, requirePermission("canSendMessages"), async (req, res) => {
@@ -217,6 +283,7 @@ router.patch("/conversations/:id", requireAuth, requirePermission("canSendMessag
   if (chatReasonId !== undefined) {
     if (chatReasonId === null) {
       updates.chatReasonId = null;
+      updates.chatReasonAuto = false;
     } else {
       const n = Number(chatReasonId);
       if (!Number.isInteger(n) || n <= 0) {
@@ -224,6 +291,7 @@ router.patch("/conversations/:id", requireAuth, requirePermission("canSendMessag
         return;
       }
       updates.chatReasonId = n;
+      updates.chatReasonAuto = false; // chosen by a person: automation keeps its hands off
     }
   }
   // Only admins may reassign conversations to another agent.

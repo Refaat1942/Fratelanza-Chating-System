@@ -9,9 +9,13 @@ import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { tryAutoAssign } from "../lib/assignment";
+import { classifyConversation } from "../lib/topics";
 import {
   digitsOnly,
   parseWhatsAppWebhook,
+  parseBusinessAppSync,
+  type SyncedMessage,
+  type SyncedContact,
   safeEqual,
   verifyMetaSignature,
   whatsappConfig,
@@ -32,6 +36,120 @@ interface InboundPayload {
 
 function getIo(req: Request): IOServer | undefined {
   return req.app.get("io") as IOServer | undefined;
+}
+
+/** Match a customer by phone digits ("+20 100…", "0100…", "2010…" are one
+ *  person); create one when unknown. */
+async function findOrCreateCustomer(digits: string, name?: string) {
+  const [existing] = await db
+    .select()
+    .from(customersTable)
+    .where(sql`regexp_replace(${customersTable.phone}, '\\D', '', 'g') = ${digits}`)
+    .limit(1);
+  if (existing) return existing;
+  const [created] = await db
+    .insert(customersTable)
+    .values({ name: name?.trim() || `+${digits}`, phone: `+${digits}`, tags: ["New"] })
+    .returning();
+  return created;
+}
+
+/**
+ * Store one message that already happened outside this app — sent from the
+ * WhatsApp Business phone app (echo) or imported chat history. Never sends
+ * anything; idempotent on the WhatsApp message id.
+ */
+async function importSyncedMessage(m: SyncedMessage, source: "echo" | "history", io?: IOServer): Promise<boolean> {
+  const [dup] = await db
+    .select({ id: messagesTable.id })
+    .from(messagesTable)
+    .where(eq(messagesTable.externalId, m.externalId))
+    .limit(1);
+  if (dup) return false;
+
+  const customer = await findOrCreateCustomer(m.customer);
+  const at = m.timestamp ?? new Date();
+
+  let [conv] = await db
+    .select()
+    .from(conversationsTable)
+    .where(and(eq(conversationsTable.customerId, customer.id), eq(conversationsTable.channel, "whatsapp")))
+    .orderBy(desc(conversationsTable.createdAt))
+    .limit(1);
+
+  if (!conv) {
+    const stale = Date.now() - at.getTime() > 7 * 24 * 3600 * 1000;
+    [conv] = await db
+      .insert(conversationsTable)
+      .values({
+        customerId: customer.id,
+        channel: "whatsapp",
+        // Imported old chats must not flood the active inbox.
+        status: source === "history" && stale ? "completed" : "pending",
+        lastMessage: m.body,
+        lastMessageAt: at,
+        lastSenderType: m.direction === "out" ? "agent" : "customer",
+        unreadCount: 0,
+        createdAt: at,
+      })
+      .returning();
+  }
+
+  const inserted = await db
+    .insert(messagesTable)
+    .values({
+      conversationId: conv.id,
+      senderType: m.direction === "out" ? "agent" : "customer",
+      body: m.body,
+      status: m.direction === "out" ? (m.status ?? "sent") : "delivered",
+      externalId: m.externalId,
+      createdAt: at,
+    })
+    .onConflictDoNothing({ target: messagesTable.externalId })
+    .returning();
+  if (inserted.length === 0) return false;
+
+  // Echoes arrive live, so they are always the latest event (their whole-second
+  // WhatsApp timestamp can be a moment "older" than our receive time for the
+  // customer's last message). History is placed by its original date.
+  const newer =
+    source === "echo" || !conv.lastMessageAt || at.getTime() >= new Date(conv.lastMessageAt).getTime();
+  const updates: Record<string, unknown> = {};
+  if (newer) {
+    updates.lastMessage = m.body;
+    updates.lastMessageAt = at;
+    updates.lastSenderType = m.direction === "out" ? "agent" : "customer";
+  }
+  if (source === "echo") {
+    // Answered from the phone: the chat is handled and waiting on the customer.
+    updates.unreadCount = 0;
+    if (conv.status !== "pending") updates.status = "pending";
+  }
+  if (Object.keys(updates).length) {
+    await db.update(conversationsTable).set(updates).where(eq(conversationsTable.id, conv.id));
+  }
+  if (m.direction === "in") {
+    try { await classifyConversation(conv.id); } catch { /* non-critical */ }
+  }
+  if (io) {
+    io.to(`conv:${conv.id}`).emit("new_message", inserted[0]);
+    io.emit("conversation_updated", { conversationId: conv.id });
+  }
+  return true;
+}
+
+/** Contact names saved in the phone app replace auto-generated names only. */
+async function applyContactSync(c: SyncedContact): Promise<void> {
+  if (!c.name || c.action === "remove") return;
+  const [existing] = await db
+    .select({ id: customersTable.id, name: customersTable.name })
+    .from(customersTable)
+    .where(sql`regexp_replace(${customersTable.phone}, '\\D', '', 'g') = ${c.phone}`)
+    .limit(1);
+  if (!existing) return; // never import the whole phone address book
+  if (/^\+?[\d\s-]+$/.test(existing.name.trim())) {
+    await db.update(customersTable).set({ name: c.name }).where(eq(customersTable.id, existing.id));
+  }
 }
 
 /**
@@ -81,24 +199,7 @@ async function ingestInbound(
     }
   }
 
-  // Match the customer by digits so "+20 100 123 4567", "0100…" exports and
-  // Meta's "201001234567" all resolve to the same record.
-  let [customer] = await db
-    .select()
-    .from(customersTable)
-    .where(sql`regexp_replace(${customersTable.phone}, '\\D', '', 'g') = ${digits}`)
-    .limit(1);
-
-  if (!customer) {
-    [customer] = await db
-      .insert(customersTable)
-      .values({
-        name: payload.name?.trim() || `+${digits}`,
-        phone: `+${digits}`,
-        tags: ["New"],
-      })
-      .returning();
-  }
+  const customer = await findOrCreateCustomer(digits, payload.name);
 
   // Active = open OR pending. (Pending = waiting on customer / queued.) Using
   // only "open" here would spawn a fresh conversation on every reply that
@@ -169,6 +270,12 @@ async function ingestInbound(
     })
     .where(eq(conversationsTable.id, conv.id));
 
+  try {
+    await classifyConversation(conv.id);
+  } catch (err) {
+    logger.error({ err, conversationId: conv.id }, "Topic classification failed");
+  }
+
   if (!conv.assignedAgentId) {
     try {
       await tryAutoAssign(conv.id, io);
@@ -232,6 +339,25 @@ router.post("/webhooks/whatsapp", async (req, res) => {
 
   const io = getIo(req);
   const { messages, statuses } = parseWhatsAppWebhook(req.body);
+  const sync = parseBusinessAppSync(req.body);
+
+  for (const m of sync.echoes) {
+    try { await importSyncedMessage(m, "echo", io); }
+    catch (err) { logger.error({ err, externalId: m.externalId }, "WhatsApp echo import failed"); }
+  }
+  let imported = 0;
+  for (const m of sync.history) {
+    try { if (await importSyncedMessage(m, "history")) imported++; }
+    catch (err) { logger.error({ err, externalId: m.externalId }, "WhatsApp history import failed"); }
+  }
+  if (sync.history.length) {
+    logger.info({ received: sync.history.length, imported }, "WhatsApp history chunk imported");
+    io?.emit("conversation_updated", { conversationId: 0 });
+  }
+  for (const c of sync.contacts) {
+    try { await applyContactSync(c); }
+    catch (err) { logger.error({ err }, "WhatsApp contact sync failed"); }
+  }
 
   for (const m of messages) {
     try {

@@ -38,6 +38,11 @@ import {
   RotateCcw,
   Loader2,
   Globe,
+  Layers,
+  ListChecks,
+  ListPlus,
+  ChevronRight,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,7 +71,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { FaWhatsapp, FaFacebookMessenger, FaInstagram, FaSms } from "react-icons/fa";
 import { useLocation, useSearch } from "wouter";
-import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions } from "@/lib/api-extra";
+import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, type BulkAction } from "@/lib/api-extra";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -76,6 +82,8 @@ import { cn } from "@/lib/utils";
 import { useGetMe } from "@workspace/api-client-react";
 
 type Conv = Conversation & {
+  chatReasonId?: number | null;
+  chatReasonAuto?: boolean;
   channel?: string;
   lastSenderType?: "agent" | "customer" | "system" | null;
 };
@@ -123,6 +131,25 @@ function dayLabel(d: Date): string {
   return format(d, "EEEE, d MMMM yyyy");
 }
 
+function readPref(k: string, d: string): string {
+  try { return localStorage.getItem(k) ?? d; } catch { return d; }
+}
+function writePref(k: string, v: string) {
+  try { localStorage.setItem(k, v); } catch { /* storage unavailable */ }
+}
+
+/** "Waiting 3d" (customer owes nothing, we do) / "No reply 5d" (we wrote last). */
+function ageLabel(c: Conv): { text: string; title: string; urgent: boolean } | null {
+  if (c.status === "completed" || !c.lastMessageAt) return null;
+  const days = Math.floor((Date.now() - new Date(c.lastMessageAt).getTime()) / 86_400_000);
+  if (days < 1) return null;
+  const d = days === 1 ? "1 day" : `${days} days`;
+  if (c.lastSenderType === "customer") {
+    return { text: `Waiting ${days}d`, title: `Customer has been waiting ${d} for a reply`, urgent: days >= 2 };
+  }
+  return { text: `No reply ${days}d`, title: `${d} since our last message — customer has not answered`, urgent: false };
+}
+
 function customerTitle(c: { customer?: { name?: string | null; phone?: string | null } | null }): string {
   return c.customer?.name?.trim() || c.customer?.phone || "Unknown";
 }
@@ -130,7 +157,7 @@ function customerTitle(c: { customer?: { name?: string | null; phone?: string | 
 /* -------------------------------------------------------------------- page */
 
 export default function ChatPage() {
-  const [location, navigate] = useLocation();
+  const [, navigate] = useLocation();
   const searchString = useSearch();
   const { data: me } = useGetMe();
   const { toast } = useToast();
@@ -148,13 +175,23 @@ export default function ChatPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [channelFilter, setChannelFilter] = useState<string>("all");
+  const [topicFilter, setTopicFilter] = useState<string>("all"); // "all" | "none" | id
+  const [listFilter, setListFilter] = useState<string>("all"); // "all" | tag
+  const [groupByTopic, setGroupByTopic] = useState<boolean>(() => readPref("inbox_group_topic", "1") === "1");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
   const [visible, setVisible] = useState(PAGE);
   const [message, setMessage] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const wideDetails = useMediaQuery("(min-width: 1280px)");
 
   const { data: insights } = useInsights();
+  const { data: topics } = useChatReasons();
   const slaMinutes = insights?.slaMinutes ?? 15;
+  const topicById = useMemo(() => new Map((topics ?? []).map((t) => [t.id, t])), [topics]);
+
+  useEffect(() => writePref("inbox_group_topic", groupByTopic ? "1" : "0"), [groupByTopic]);
 
   const insertReply = useCallback((text: string) => {
     setMessage((prev) => {
@@ -164,24 +201,25 @@ export default function ChatPage() {
     setDetailsOpen(false);
   }, []);
 
-  // Whole list is fetched once; filtering/sorting is client-side. Live updates
-  // come from useInboxSync (AppLayout) invalidating this query on change only.
+  // Whole list is fetched once; filtering/sorting/grouping is client-side. Live
+  // updates come from useInboxSync (AppLayout) invalidating this query on change.
   const { data: convsRaw, isLoading, isError, refetch } = useListConversations(undefined, {
     query: { queryKey: getListConversationsQueryKey(), staleTime: 15_000 },
   });
+  const all = (convsRaw as Conv[] | undefined) ?? [];
 
-  const channels = useMemo(() => {
-    const set = new Set<string>();
-    (convsRaw as Conv[] | undefined)?.forEach((c) => set.add(c.channel ?? "whatsapp"));
-    return [...set];
-  }, [convsRaw]);
+  const channels = useMemo(() => [...new Set(all.map((c) => c.channel ?? "whatsapp"))], [all]);
+  const lists = useMemo(() => [...new Set(all.flatMap((c) => c.tags ?? []))].sort((a, b) => a.localeCompare(b)), [all]);
 
   const conversations = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const rows = ((convsRaw as Conv[] | undefined) ?? []).filter((c) => {
+    const rows = all.filter((c) => {
       if (statusFilter === "active" && c.status === "completed") return false;
       if (statusFilter !== "active" && statusFilter !== "all" && c.status !== statusFilter) return false;
       if (channelFilter !== "all" && (c.channel ?? "whatsapp") !== channelFilter) return false;
+      if (topicFilter === "none" && c.chatReasonId) return false;
+      if (topicFilter !== "all" && topicFilter !== "none" && String(c.chatReasonId) !== topicFilter) return false;
+      if (listFilter !== "all" && !(c.tags ?? []).includes(listFilter)) return false;
       if (!q) return true;
       return (
         (c.customer?.name ?? "").toLowerCase().includes(q) ||
@@ -195,37 +233,173 @@ export default function ChatPage() {
       const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
       return tb - ta || b.id - a.id;
     });
-  }, [convsRaw, search, statusFilter, channelFilter]);
+  }, [all, search, statusFilter, channelFilter, topicFilter, listFilter]);
 
-  useEffect(() => setVisible(PAGE), [search, statusFilter, channelFilter]);
+  // Topic sections in the admin's topic order; "Unsorted" last.
+  const groups = useMemo(() => {
+    const by = new Map<string, Conv[]>();
+    for (const c of conversations) {
+      const k = c.chatReasonId && topicById.has(c.chatReasonId) ? String(c.chatReasonId) : "none";
+      (by.get(k) ?? by.set(k, []).get(k)!).push(c);
+    }
+    const order = [...(topics ?? []).map((t) => String(t.id)), "none"];
+    return order
+      .filter((k) => by.has(k))
+      .map((k) => {
+        const t = k === "none" ? null : topicById.get(Number(k)) ?? null;
+        const rows = by.get(k)!;
+        return { key: k, name: t?.nameEn ?? "Unsorted", color: t?.color ?? "#94A3B8", rows, unread: rows.reduce((n, r) => n + (r.unreadCount > 0 ? 1 : 0), 0) };
+      });
+  }, [conversations, topics, topicById]);
+
+  useEffect(() => setVisible(PAGE), [search, statusFilter, channelFilter, topicFilter, listFilter]);
+  // Drop selections that are no longer visible.
+  useEffect(() => {
+    setPicked((prev) => {
+      const ids = new Set(conversations.map((c) => c.id));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [conversations]);
+
+  const togglePick = (id: number) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
 
   const showList = !selectedConvId; // on phones: list OR conversation
+  const filtersActive = topicFilter !== "all" || listFilter !== "all" || channelFilter !== "all";
+
+  const renderRow = (conv: Conv) => {
+    const tone = chatTone(conv, slaMinutes);
+    const unread = conv.unreadCount > 0;
+    const selected = selectedConvId === conv.id;
+    const topic = conv.chatReasonId ? topicById.get(conv.chatReasonId) : undefined;
+    const age = ageLabel(conv);
+    const isPicked = picked.has(conv.id);
+    return (
+      <li key={conv.id} className="flex items-stretch">
+        {selectMode && (
+          <label className="flex items-center pl-3 sm:pl-4 cursor-pointer" aria-label={`Select ${customerTitle(conv)}`}>
+            <Checkbox checked={isPicked} onCheckedChange={() => togglePick(conv.id)} className="h-5 w-5" data-testid={`pick-${conv.id}`} />
+          </label>
+        )}
+        <button
+          type="button"
+          onClick={() => (selectMode ? togglePick(conv.id) : selectConv(conv.id))}
+          aria-current={selected ? "true" : undefined}
+          className={cn(
+            "flex-1 min-w-0 text-left px-3 sm:px-4 py-3 min-h-[72px] flex gap-3 transition-colors hover:bg-muted/60",
+            selected && !selectMode && "bg-accent shadow-[inset_3px_0_0_0_hsl(var(--brand-accent))]",
+            isPicked && "bg-accent",
+          )}
+          data-testid={`btn-select-conv-${conv.id}`}
+        >
+          <Avatar className="h-11 w-11 shrink-0">
+            <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">{initials(customerTitle(conv))}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className={cn("text-sm truncate bidi", unread ? "font-bold" : "font-medium")}>{customerTitle(conv)}</p>
+              <time className={cn("text-[11px] whitespace-nowrap", unread ? "text-foreground font-semibold" : "text-muted-foreground")}>
+                {listTime(conv.lastMessageAt)}
+              </time>
+            </div>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className={cn("text-[13px] truncate flex-1 bidi", unread ? "text-foreground" : "text-muted-foreground")}>
+                {conv.lastSenderType === "agent" && <span className="text-muted-foreground">You: </span>}
+                {conv.lastMessage || "No messages yet"}
+              </p>
+              {unread && (
+                <span
+                  className="min-w-5 h-5 px-1.5 rounded-full bg-brand-accent text-brand-accent-foreground text-[11px] font-bold flex items-center justify-center shrink-0"
+                  aria-label={`${conv.unreadCount} unread`}
+                >
+                  {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 mt-1.5 min-w-0 flex-wrap">
+              <ChannelGlyph channel={conv.channel} />
+              {tone && (
+                <Badge variant="outline" className={cn("text-[10px] px-1.5 h-[18px] font-medium border", tone.tone)}>
+                  {tone.label}
+                </Badge>
+              )}
+              {age && (
+                <span className={cn("text-[10px] font-semibold px-1.5 h-[18px] rounded inline-flex items-center", age.urgent ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")} title={age.title} data-testid={`age-${conv.id}`}>
+                  {age.text}
+                </span>
+              )}
+              {topic && !groupByTopic && (
+                <span className="text-[10px] font-medium inline-flex items-center gap-1 text-muted-foreground truncate max-w-[45%]">
+                  <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: topic.color }} aria-hidden />
+                  {topic.nameEn}
+                </span>
+              )}
+              {(conv.tags ?? []).slice(0, 2).map((t) => (
+                <span key={t} className="text-[10px] px-1.5 h-[18px] rounded border border-border inline-flex items-center text-muted-foreground">{t}</span>
+              ))}
+            </div>
+          </div>
+        </button>
+      </li>
+    );
+  };
 
   return (
     <div className="flex h-full w-full min-h-0 bg-background overflow-hidden">
       {/* -------- Conversation list -------- */}
       <aside
         className={cn(
-          "flex-col min-h-0 w-full md:w-[340px] lg:w-[380px] md:flex-shrink-0 md:border-r border-border bg-card",
+          "flex-col min-h-0 w-full md:w-[360px] lg:w-[400px] md:flex-shrink-0 md:border-r border-border bg-card",
           showList ? "flex" : "hidden md:flex",
         )}
         aria-label="Conversations"
       >
         <div className="p-3 sm:p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-semibold text-lg tracking-tight">Inbox</h2>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-              <SelectTrigger className="w-[130px] h-9 text-xs" aria-label="Filter by status">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="all">All</SelectItem>
-              </SelectContent>
-            </Select>
+            <h2 className="font-extrabold text-lg tracking-tight">Inbox</h2>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant={groupByTopic ? "secondary" : "ghost"}
+                size="sm"
+                className="h-9 px-2.5 text-xs"
+                onClick={() => setGroupByTopic((v) => !v)}
+                aria-pressed={groupByTopic}
+                data-testid="btn-group-topic"
+                title="Group chats by topic"
+              >
+                <Layers className="h-4 w-4 sm:mr-1.5" /> <span className="hidden sm:inline">Topics</span>
+              </Button>
+              <Button
+                type="button"
+                variant={selectMode ? "secondary" : "ghost"}
+                size="sm"
+                className="h-9 px-2.5 text-xs"
+                onClick={() => { setSelectMode((v) => !v); setPicked(new Set()); }}
+                aria-pressed={selectMode}
+                data-testid="btn-select-mode"
+                title="Select several chats"
+              >
+                <ListChecks className="h-4 w-4 sm:mr-1.5" /> <span className="hidden sm:inline">Select</span>
+              </Button>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+                <SelectTrigger className="w-[104px] h-9 text-xs" aria-label="Filter by status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" aria-hidden />
@@ -238,6 +412,32 @@ export default function ChatPage() {
               onChange={(e) => setSearch(e.target.value)}
               data-testid="input-chat-search"
             />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Select value={topicFilter} onValueChange={setTopicFilter}>
+              <SelectTrigger className="h-9 text-xs" aria-label="Filter by topic" data-testid="filter-topic">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All topics</SelectItem>
+                {(topics ?? []).filter((t) => t.isActive).map((t) => (
+                  <SelectItem key={t.id} value={String(t.id)}>
+                    <span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: t.color }} />{t.nameEn}</span>
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">Unsorted</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={listFilter} onValueChange={setListFilter}>
+              <SelectTrigger className="h-9 text-xs" aria-label="Filter by list" data-testid="filter-list">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All lists</SelectItem>
+                {lists.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                {lists.length === 0 && <div className="px-2 py-1.5 text-xs text-muted-foreground">No lists yet — select chats and “Add to list”.</div>}
+              </SelectContent>
+            </Select>
           </div>
           {channels.length > 1 && (
             <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label="Channel">
@@ -257,6 +457,11 @@ export default function ChatPage() {
                 </button>
               ))}
             </div>
+          )}
+          {filtersActive && (
+            <button type="button" className="text-xs text-primary font-medium" onClick={() => { setTopicFilter("all"); setListFilter("all"); setChannelFilter("all"); }}>
+              Clear filters · {conversations.length} chat{conversations.length === 1 ? "" : "s"}
+            </button>
           )}
         </div>
 
@@ -278,69 +483,48 @@ export default function ChatPage() {
           ) : conversations.length === 0 ? (
             <EmptyState
               icon={<MessageSquare className="h-10 w-10" />}
-              title={search ? "No matching conversations" : "No conversations yet"}
-              hint={search ? "Try a different name, number or word." : "New WhatsApp messages will appear here automatically."}
+              title={search || filtersActive ? "No matching conversations" : "No conversations yet"}
+              hint={search || filtersActive ? "Try a different search or clear the filters." : "New WhatsApp messages will appear here automatically."}
             />
-          ) : (
-            <ul className="divide-y divide-border" data-testid="conversation-list">
-              {conversations.slice(0, visible).map((conv) => {
-                const tone = chatTone(conv, slaMinutes);
-                const unread = conv.unreadCount > 0;
-                const selected = selectedConvId === conv.id;
+          ) : groupByTopic ? (
+            <div data-testid="conversation-list">
+              {groups.map((g) => {
+                const isCollapsed = collapsed.has(g.key);
                 return (
-                  <li key={conv.id}>
+                  <section key={g.key} aria-label={g.name} data-testid={`group-${g.key}`}>
                     <button
                       type="button"
-                      onClick={() => selectConv(conv.id)}
-                      aria-current={selected ? "true" : undefined}
-                      className={cn(
-                        "w-full text-left px-3 sm:px-4 py-3 min-h-[72px] flex gap-3 transition-colors hover:bg-muted/60",
-                        selected && "bg-accent shadow-[inset_3px_0_0_0_hsl(var(--brand-accent))]",
-                      )}
-                      data-testid={`btn-select-conv-${conv.id}`}
+                      onClick={() => setCollapsed((prev) => { const n = new Set(prev); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}
+                      className="sticky top-0 z-10 w-full flex items-center gap-2 px-3 sm:px-4 py-2 bg-muted/90 backdrop-blur border-y border-border text-left"
+                      aria-expanded={!isCollapsed}
                     >
-                      <Avatar className="h-11 w-11 shrink-0">
-                        <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
-                          {initials(customerTitle(conv))}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <p className={cn("text-sm truncate bidi", unread ? "font-bold" : "font-medium")}>{customerTitle(conv)}</p>
-                          <time className={cn("text-[11px] whitespace-nowrap", unread ? "text-foreground font-semibold" : "text-muted-foreground")}>
-                            {listTime(conv.lastMessageAt)}
-                          </time>
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <p className={cn("text-[13px] truncate flex-1 bidi", unread ? "text-foreground" : "text-muted-foreground")}>
-                            {conv.lastSenderType === "agent" && <span className="text-muted-foreground">You: </span>}
-                            {conv.lastMessage || "No messages yet"}
-                          </p>
-                          {unread && (
-                            <span
-                              className="min-w-5 h-5 px-1.5 rounded-full bg-brand-accent text-brand-accent-foreground text-[11px] font-bold flex items-center justify-center shrink-0"
-                              aria-label={`${conv.unreadCount} unread`}
-                            >
-                              {conv.unreadCount > 99 ? "99+" : conv.unreadCount}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 mt-1.5 min-w-0">
-                          <ChannelGlyph channel={conv.channel} />
-                          {tone && (
-                            <Badge variant="outline" className={cn("text-[10px] px-1.5 h-[18px] font-medium border", tone.tone)}>
-                              {tone.label}
-                            </Badge>
-                          )}
-                          {conv.assignedAgent && (
-                            <span className="text-[11px] text-muted-foreground truncate">{userLabel(conv.assignedAgent as AppUser)}</span>
-                          )}
-                        </div>
-                      </div>
+                      <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", !isCollapsed && "rotate-90")} />
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: g.color }} aria-hidden />
+                      <span className="text-xs font-bold uppercase tracking-wide truncate flex-1">{g.name}</span>
+                      {g.unread > 0 && (
+                        <span className="text-[10px] font-bold rounded-full px-1.5 h-[18px] inline-flex items-center bg-brand-accent text-brand-accent-foreground">{g.unread} new</span>
+                      )}
+                      <span className="text-xs font-semibold tabular-nums text-muted-foreground">{g.rows.length}</span>
+                      {selectMode && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className="text-[11px] font-semibold text-primary ml-1"
+                          onClick={(e) => { e.stopPropagation(); setPicked((prev) => new Set([...prev, ...g.rows.map((r) => r.id)])); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setPicked((prev) => new Set([...prev, ...g.rows.map((r) => r.id)])); } }}
+                        >
+                          Select all
+                        </span>
+                      )}
                     </button>
-                  </li>
+                    {!isCollapsed && <ul className="divide-y divide-border">{g.rows.map(renderRow)}</ul>}
+                  </section>
                 );
               })}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border" data-testid="conversation-list">
+              {conversations.slice(0, visible).map(renderRow)}
               {conversations.length > visible && (
                 <li className="p-3">
                   <Button variant="outline" className="w-full h-10" onClick={() => setVisible((v) => v + PAGE)}>
@@ -351,6 +535,20 @@ export default function ChatPage() {
             </ul>
           )}
         </ScrollArea>
+
+        {selectMode && (
+          <BulkBar
+            ids={[...picked]}
+            topics={(topics ?? []).filter((t) => t.isActive)}
+            lists={lists}
+            isAdmin={me?.role === "admin"}
+            onClear={() => setPicked(new Set())}
+            onSelectAll={() => setPicked(new Set(conversations.map((c) => c.id)))}
+            total={conversations.length}
+            onDone={(msg) => toast({ title: msg })}
+            onError={(msg) => toast({ title: msg, variant: "destructive" })}
+          />
+        )}
       </aside>
 
       {/* -------- Conversation -------- */}
@@ -387,12 +585,107 @@ export default function ChatPage() {
           <SheetContent side="right" className="p-0 w-full sm:max-w-sm">
             <SheetHeader className="sr-only">
               <SheetTitle>Conversation details</SheetTitle>
-              <SheetDescription>Customer, tags, assignment and quick replies</SheetDescription>
+              <SheetDescription>Customer, topic, lists and quick replies</SheetDescription>
             </SheetHeader>
             <ChatContextPanel conversationId={selectedConvId} onInsertReply={insertReply} />
           </SheetContent>
         </Sheet>
       )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- bulk bar */
+
+function BulkBar({
+  ids, topics, lists, isAdmin, total, onClear, onSelectAll, onDone, onError,
+}: {
+  ids: number[];
+  topics: { id: number; nameEn: string; color: string }[];
+  lists: string[];
+  isAdmin: boolean;
+  total: number;
+  onClear: () => void;
+  onSelectAll: () => void;
+  onDone: (msg: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const bulk = useBulkConversations();
+  const [listName, setListName] = useState("");
+  const [listOpen, setListOpen] = useState(false);
+  const n = ids.length;
+
+  const run = (a: BulkAction, label: string) =>
+    bulk.mutate(
+      { ids, ...a } as { ids: number[] } & BulkAction,
+      {
+        onSuccess: (r) =>
+          onDone(r.skipped ? `${label}: ${r.updated} changed, ${r.skipped} skipped (not yours or already done)` : `${label}: ${r.updated} chat${r.updated === 1 ? "" : "s"}`),
+        onError: (e) => onError((e as { data?: { error?: string } }).data?.error ?? "Action failed"),
+      },
+    );
+
+  return (
+    <div className="border-t border-border bg-card px-3 py-2.5 space-y-2 pb-safe" role="toolbar" aria-label="Bulk actions" data-testid="bulk-bar">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-semibold">{n} selected</span>
+        <span className="flex gap-3">
+          {n < total && <button type="button" className="text-primary font-medium" onClick={onSelectAll}>Select all {total}</button>}
+          {n > 0 && <button type="button" className="text-muted-foreground" onClick={onClear}>Clear</button>}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} data-testid="bulk-topic">
+              <Layers className="h-4 w-4 mr-1.5" /> Topic
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
+            {topics.map((t) => (
+              <DropdownMenuItem key={t.id} onClick={() => run({ action: "topic", value: t.id }, `Moved to ${t.nameEn}`)}>
+                <span className="h-2 w-2 rounded-full mr-2" style={{ backgroundColor: t.color }} /> {t.nameEn}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => run({ action: "topic", value: null }, "Topic cleared")}>Unsorted</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu open={listOpen} onOpenChange={setListOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} data-testid="bulk-list">
+              <ListPlus className="h-4 w-4 mr-1.5" /> Add to list
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64 p-2">
+            <form
+              className="flex gap-1.5 mb-1"
+              onSubmit={(e) => { e.preventDefault(); const v = listName.trim(); if (v) { run({ action: "addTag", value: v }, `Added to “${v}”`); setListName(""); setListOpen(false); } }}
+            >
+              <Input value={listName} onChange={(e) => setListName(e.target.value)} placeholder="New list name" className="h-9 text-sm" aria-label="New list name" data-testid="bulk-list-input" onKeyDown={(e) => e.stopPropagation()} />
+              <Button type="submit" size="sm" className="h-9" data-testid="bulk-list-add">Add</Button>
+            </form>
+            {lists.map((l) => (
+              <DropdownMenuItem key={l} onClick={() => run({ action: "addTag", value: l }, `Added to “${l}”`)}>{l}</DropdownMenuItem>
+            ))}
+            {lists.length > 0 && <DropdownMenuSeparator />}
+            {lists.map((l) => (
+              <DropdownMenuItem key={`rm-${l}`} className="text-muted-foreground" onClick={() => run({ action: "removeTag", value: l }, `Removed from “${l}”`)}>Remove from “{l}”</DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} onClick={() => run({ action: "read" }, "Marked read")}>
+          <CheckCheck className="h-4 w-4 mr-1.5" /> Read
+        </Button>
+        <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} onClick={() => run({ action: "status", value: "completed" }, "Completed")}>
+          <CheckCircle2 className="h-4 w-4 mr-1.5" /> Complete
+        </Button>
+        {!isAdmin && (
+          <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} onClick={() => run({ action: "assignMe" }, "Claimed")}>
+            Claim
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -423,7 +716,12 @@ function ChatCenter({
   onOpenDetails: () => void;
   showDetailsButton: boolean;
 }) {
-  const [isNote, setIsNote] = useState(false);
+  const [noteToggle, setIsNote] = useState(false);
+  // Server kill switch: while sending to customers is off, the composer only
+  // writes internal notes. Unknown (still loading) is treated as OFF.
+  const { data: sys } = useSystemStatus();
+  const noteOnly = sys?.outboundEnabled !== true;
+  const isNote = noteOnly || noteToggle;
   const [attachments, setAttachments] = useState<string[]>([]);
   const [atBottom, setAtBottom] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -827,8 +1125,12 @@ function ChatCenter({
             )}
           >
             {isNote && (
-              <div className="bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning border-b border-warning/30 flex items-center">
-                <Clock className="h-3 w-3 mr-1.5" aria-hidden /> Internal note — not sent to the customer
+              <div className="bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning border-b border-warning/30 flex items-center" data-testid="note-banner">
+                {noteOnly ? (
+                  <><Lock className="h-3 w-3 mr-1.5 shrink-0" aria-hidden /> Sending to customers is turned off — what you write is saved as an internal note only.</>
+                ) : (
+                  <><Clock className="h-3 w-3 mr-1.5" aria-hidden /> Internal note — not sent to the customer</>
+                )}
               </div>
             )}
             <Textarea
@@ -844,16 +1146,18 @@ function ChatCenter({
             />
             <div className="flex items-center justify-between px-2 py-1.5 border-t border-border">
               <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={cn("h-10 px-3 text-xs", isNote && "bg-warning/15 text-warning")}
-                  onClick={() => setIsNote((v) => !v)}
-                  aria-pressed={isNote}
-                >
-                  <Clock className="h-3.5 w-3.5 mr-1.5" /> Note
-                </Button>
+                {!noteOnly && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={cn("h-10 px-3 text-xs", isNote && "bg-warning/15 text-warning")}
+                    onClick={() => setIsNote((v) => !v)}
+                    aria-pressed={isNote}
+                  >
+                    <Clock className="h-3.5 w-3.5 mr-1.5" /> Note
+                  </Button>
+                )}
                 <Button type="button" variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground" onClick={() => fileInputRef.current?.click()} disabled={!canSend || uploadMut.isPending} aria-label="Attach a file">
                   {uploadMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                 </Button>
@@ -871,9 +1175,9 @@ function ChatCenter({
                 disabled={(!message.trim() && attachments.length === 0) || sendMessageMut.isPending || !canSend}
                 data-testid="btn-send-message"
               >
-                {sendMessageMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 sm:mr-2" />}
-                <span className="hidden sm:inline">Send</span>
-                <span className="sr-only sm:hidden">Send</span>
+                {sendMessageMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : isNote ? <Clock className="h-4 w-4 sm:mr-2" /> : <Send className="h-4 w-4 sm:mr-2" />}
+                <span className="hidden sm:inline">{isNote ? "Save note" : "Send"}</span>
+                <span className="sr-only sm:hidden">{isNote ? "Save note" : "Send"}</span>
               </Button>
             </div>
           </div>
@@ -1011,16 +1315,20 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">Reason</label>
+              <label className="text-xs text-muted-foreground">
+                Topic{(conv as { chatReasonAuto?: boolean } | undefined)?.chatReasonAuto ? " · sorted automatically from the chat" : ""}
+              </label>
               <div><ChatReasonPicker conversationId={conversationId} currentReasonId={(conv as { chatReasonId?: number | null } | undefined)?.chatReasonId ?? null} /></div>
             </div>
+
+            <ActivityFacts conv={conv as ActivityConv | undefined} />
 
             <Separator />
 
             {/* Conversation Tags */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tags</h4>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Lists &amp; tags</h4>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1220,11 +1528,11 @@ function ChatReasonPicker({
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(conversationId) });
           queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
-          toast({ title: id ? "Chat reason updated" : "Chat reason cleared" });
+          toast({ title: id ? "Topic updated" : "Topic cleared" });
         },
         onError: (err) => {
           toast({
-            title: "Failed to update reason",
+            title: "Failed to update topic",
             description: err instanceof Error ? err.message : String(err),
             variant: "destructive",
           });
@@ -1250,7 +1558,7 @@ function ChatReasonPicker({
           ) : (
             <>
               <TagIcon className="h-3.5 w-3.5" />
-              Set reason
+              Set topic
             </>
           )}
           <ChevronDown className="h-3 w-3 opacity-60" />
@@ -1261,7 +1569,7 @@ function ChatReasonPicker({
           <>
             <DropdownMenuItem onClick={() => setReason(null)} data-testid="reason-clear">
               <X className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-              Clear reason
+              Clear topic
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>
@@ -1281,9 +1589,39 @@ function ChatReasonPicker({
             </DropdownMenuItem>
           ))
         ) : (
-          <div className="px-2 py-2 text-xs text-muted-foreground">No reasons configured</div>
+          <div className="px-2 py-2 text-xs text-muted-foreground">No topics configured</div>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+
+/* ------------------------------------------------------------ activity facts */
+
+type ActivityConv = { createdAt?: string; lastMessageAt?: string | null; lastSenderType?: string | null; status?: string };
+
+function ago(iso?: string | null): string {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86_400_000);
+  if (days >= 1) return days === 1 ? "1 day ago" : `${days} days ago`;
+  const h = Math.floor(ms / 3_600_000);
+  if (h >= 1) return h === 1 ? "1 hour ago" : `${h} hours ago`;
+  const m = Math.max(0, Math.floor(ms / 60_000));
+  return m <= 1 ? "just now" : `${m} min ago`;
+}
+
+function ActivityFacts({ conv }: { conv?: ActivityConv }) {
+  if (!conv) return null;
+  const waitingOnUs = conv.status !== "completed" && conv.lastSenderType === "customer";
+  const waitingOnCustomer = conv.status !== "completed" && conv.lastSenderType === "agent";
+  return (
+    <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs space-y-1.5" data-testid="activity-facts">
+      <div className="flex justify-between gap-2"><span className="text-muted-foreground">Last message</span><span className="font-semibold">{ago(conv.lastMessageAt)}</span></div>
+      <div className="flex justify-between gap-2"><span className="text-muted-foreground">Chat started</span><span className="font-medium">{ago(conv.createdAt)}</span></div>
+      {waitingOnUs && <p className="text-destructive font-semibold">Customer is waiting for our reply ({ago(conv.lastMessageAt)}).</p>}
+      {waitingOnCustomer && <p className="text-muted-foreground">We replied last — waiting for the customer ({ago(conv.lastMessageAt)}).</p>}
+    </div>
   );
 }

@@ -20,10 +20,12 @@ import webhooksRouter from "./webhooks";
 import uploadsRouter from "./uploads";
 import customerAiRouter from "./customer-ai";
 import userPermissionsRouter from "./user-permissions";
+import systemRouter from "./system";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(systemRouter);
 router.use(webhooksRouter);
 router.use(authRouter);
 router.use(userPermissionsRouter);

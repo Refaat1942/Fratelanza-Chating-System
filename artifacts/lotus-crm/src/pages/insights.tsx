@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
-import { useInsights, type UnrepliedChat, type ChatSeverity } from "@/lib/api-extra";
+import { useInsights, type UnrepliedChat, type ChatSeverity, type AgeBucket, type InsightsResponse } from "@/lib/api-extra";
 
 const SEVERITY_STYLES: Record<ChatSeverity, { dot: string; label: string; pill: string }> = {
   normal: {
@@ -63,7 +63,7 @@ export default function InsightsPage() {
   const openChat = (id: number) => setLocation(`/chat?conv=${id}`);
 
   return (
-    <div className="flex-1 space-y-6 p-8 overflow-y-auto bg-background animate-in fade-in duration-300">
+    <div className="flex-1 space-y-6 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-background">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight flex items-center gap-2">
@@ -117,6 +117,8 @@ export default function InsightsPage() {
           accent="emerald"
         />
       </div>
+
+      <ChatAgeSection aging={data?.aging} loading={isLoading} onOpen={openChat} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Unreplied / Urgent ledger */}
@@ -300,5 +302,129 @@ function EmptyState({
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="text-xs text-muted-foreground mt-1 max-w-xs">{description}</p>
     </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ chat age */
+
+const BUCKET_LABEL: Record<AgeBucket["bucket"], string> = {
+  today: "Today",
+  "1-3": "1–3 days",
+  "4-7": "4–7 days",
+  "8-30": "8–30 days",
+  "30+": "Over 30 days",
+};
+
+/** One series of counts over ordered age buckets: horizontal bars, one colour,
+ *  value labels in text ink, native tooltip per bar, no legend. */
+function AgeBars({ title, hint, rows, barClass, testId }: { title: string; hint: string; rows: AgeBucket[]; barClass: string; testId: string }) {
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  const total = rows.reduce((n, r) => n + r.count, 0);
+  return (
+    <Card className="shadow-sm" data-testid={testId}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-baseline justify-between gap-2">
+          <span>{title}</span>
+          <span className="text-2xl font-extrabold tabular-nums">{total}</span>
+        </CardTitle>
+        <CardDescription>{hint}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-2.5" aria-label={title}>
+          {rows.map((r) => (
+            <li key={r.bucket} className="grid grid-cols-[88px_1fr_36px] items-center gap-2 text-xs" title={`${BUCKET_LABEL[r.bucket]}: ${r.count} chat${r.count === 1 ? "" : "s"}`}>
+              <span className="text-muted-foreground">{BUCKET_LABEL[r.bucket]}</span>
+              <span className="h-3 rounded-sm bg-muted overflow-hidden">
+                <span className={`block h-full rounded-r-[4px] ${barClass}`} style={{ width: `${(r.count / max) * 100}%`, minWidth: r.count ? 4 : 0 }} />
+              </span>
+              <span className="text-right font-semibold tabular-nums">{r.count}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChatAgeSection({ aging, loading, onOpen }: { aging?: InsightsResponse["aging"]; loading: boolean; onOpen: (id: number) => void }) {
+  if (loading) return <Skeleton className="h-64 w-full" />;
+  if (!aging) return null;
+  return (
+    <section className="space-y-4" aria-labelledby="age-title">
+      <div>
+        <h3 id="age-title" className="text-xl font-extrabold tracking-tight flex items-center gap-2"><Clock className="h-5 w-5 text-primary" /> Chat age</h3>
+        <p className="text-sm text-muted-foreground">How many days since the last message in each active chat, and who owes the next reply.</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <AgeBars title="Customers waiting for us" hint="The customer wrote last — they are waiting for our reply." rows={aging.waitingOnUs} barClass="bg-primary" testId="age-waiting-us" />
+        <AgeBars title="Waiting for the customer" hint="We replied last — the customer has not answered yet." rows={aging.waitingOnCustomer} barClass="bg-[hsl(var(--navy-light))] dark:bg-[hsl(var(--cyan))]" testId="age-waiting-customer" />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-5">
+        <Card className="shadow-sm lg:col-span-3" data-testid="age-by-topic">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">By topic</CardTitle>
+            <CardDescription>Active chats per topic and the average days since their last message.</CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-muted-foreground text-left">
+                  <th className="font-medium py-2 pr-2">Topic</th>
+                  <th className="font-medium py-2 px-2 text-right">Active</th>
+                  <th className="font-medium py-2 px-2 text-right">Waiting for us</th>
+                  <th className="font-medium py-2 pl-2 text-right">Avg days</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {aging.byTopic.map((t) => (
+                  <tr key={t.topicId ?? "none"}>
+                    <td className="py-2 pr-2">
+                      <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: t.color }} aria-hidden />{t.name}</span>
+                    </td>
+                    <td className="py-2 px-2 text-right tabular-nums">{t.active}</td>
+                    <td className={`py-2 px-2 text-right tabular-nums ${t.waitingOnUs ? "font-semibold text-destructive" : ""}`}>{t.waitingOnUs}</td>
+                    <td className="py-2 pl-2 text-right tabular-nums">{t.active ? t.avgDaysSinceLast : "—"}</td>
+                  </tr>
+                ))}
+                {aging.byTopic.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-muted-foreground">No chats yet</td></tr>}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm lg:col-span-2" data-testid="age-oldest">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Waiting the longest</CardTitle>
+            <CardDescription>Oldest unanswered customers first.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {aging.oldestWaiting.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Nobody is waiting. 🎉</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {aging.oldestWaiting.map((o) => (
+                  <li key={o.conversationId}>
+                    <button type="button" onClick={() => onOpen(o.conversationId)} className="w-full text-left py-2.5 flex items-center gap-3 hover:bg-muted/50 rounded-md px-1">
+                      <span className={`text-sm font-extrabold tabular-nums w-12 text-center rounded-md py-1 ${o.daysWaiting >= 2 ? "bg-destructive/10 text-destructive" : "bg-muted"}`}>
+                        {o.daysWaiting}d
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold truncate bidi">{o.customerName}</span>
+                        <span className="block text-xs text-muted-foreground truncate bidi">{o.lastMessage}</span>
+                      </span>
+                      {o.topic && (
+                        <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1 shrink-0">
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: o.topicColor ?? "#94A3B8" }} aria-hidden />{o.topic}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </section>
   );
 }

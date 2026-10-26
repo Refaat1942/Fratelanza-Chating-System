@@ -48,6 +48,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UsersSettings } from "@/pages/settings-users";
 import { BrandingSettings } from "@/pages/settings-branding";
+import { TopicsSettings } from "@/pages/settings-topics";
 
 type SettingsSection = {
   value: string;
@@ -64,7 +65,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "replies",                 group: "Workflow",      label: "Quick Replies",       icon: MessageSquare, Component: QuickRepliesSettings },
   { value: "distribution",            group: "Workflow",      label: "Chat Distribution",   icon: Sliders,       Component: ChatDistributionSettings },
   { value: "chat-reason-categories",  group: "Reasons",       label: "Reason Categories",   icon: FolderOpen,    Component: ChatReasonCategoriesSettings },
-  { value: "chat-reasons",            group: "Reasons",       label: "Chat Reasons",        icon: MessageCircle, Component: ChatReasonsSettings },
+  { value: "chat-reasons",            group: "Workflow",      label: "Chat Topics",         icon: MessageCircle, Component: TopicsSettings },
   { value: "not-ready",               group: "Reasons",       label: "Not Ready Reasons",   icon: Coffee,        Component: NotReadyReasonsSettings },
   { value: "branding",                group: "Appearance",    label: "Branding",            icon: Palette,       Component: BrandingSettings },
 ];

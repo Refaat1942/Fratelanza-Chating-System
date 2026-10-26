@@ -240,3 +240,115 @@ export async function sendWhatsAppText(
   }
   return { externalId: data.messages[0].id };
 }
+
+/* ------------------------------------------------------------------------ *
+ * WhatsApp Business app "Coexistence" sync                                  *
+ *                                                                           *
+ * When the number is used in the WhatsApp Business app AND the Cloud API,   *
+ * Meta can send three extra webhook fields (they must be ticked in the app's *
+ * WhatsApp → Configuration → Webhook fields):                               *
+ *   smb_message_echoes  – messages you send from the phone app              *
+ *   history             – past chats, shared once during onboarding         *
+ *   smb_app_state_sync  – contacts added/edited in the phone app            *
+ * Labels / lists made in the phone app are NOT exposed by any Meta API.     *
+ * ------------------------------------------------------------------------ */
+
+export interface SyncedMessage {
+  externalId: string;
+  customer: string; // customer digits
+  direction: "in" | "out";
+  body: string;
+  timestamp?: Date;
+  status?: "sent" | "delivered" | "read";
+}
+
+export interface SyncedContact {
+  phone: string; // digits
+  name?: string;
+  action: string; // "add" | "edit" | "remove" | …
+}
+
+type SyncMessage = MetaMessage & { to?: string; history_context?: { status?: string } };
+
+function toDate(ts?: string): Date | undefined {
+  const n = Number(ts);
+  return Number.isFinite(n) && n > 0 ? new Date(n * 1000) : undefined;
+}
+
+function historyStatus(s?: string): SyncedMessage["status"] {
+  const v = (s ?? "").toLowerCase();
+  if (v === "read" || v === "played") return "read";
+  if (v === "delivered") return "delivered";
+  if (v) return "sent";
+  return undefined;
+}
+
+export function parseBusinessAppSync(payload: unknown): {
+  echoes: SyncedMessage[];
+  history: SyncedMessage[];
+  contacts: SyncedContact[];
+} {
+  const echoes: SyncedMessage[] = [];
+  const history: SyncedMessage[] = [];
+  const contacts: SyncedContact[] = [];
+  const p = payload as {
+    object?: string;
+    entry?: { changes?: { field?: string; value?: Record<string, unknown> }[] }[];
+  };
+  if (p?.object !== "whatsapp_business_account") return { echoes, history, contacts };
+
+  for (const entry of p.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      const v = (change.value ?? {}) as {
+        metadata?: { display_phone_number?: string };
+        message_echoes?: SyncMessage[];
+        history?: { threads?: { id?: string; messages?: SyncMessage[] }[] }[];
+        state_sync?: {
+          type?: string;
+          action?: string;
+          contact?: { full_name?: string; first_name?: string; phone_number?: string; wa_id?: string };
+        }[];
+      };
+      const business = digitsOnly(v.metadata?.display_phone_number ?? "");
+
+      if (change.field === "smb_message_echoes") {
+        for (const m of v.message_echoes ?? []) {
+          const to = digitsOnly(m.to ?? "");
+          const body = describeMessage(m);
+          if (!m.id || !to || !body) continue;
+          echoes.push({ externalId: m.id, customer: to, direction: "out", body, timestamp: toDate(m.timestamp), status: "sent" });
+        }
+      } else if (change.field === "history") {
+        for (const chunk of v.history ?? []) {
+          for (const thread of chunk.threads ?? []) {
+            const customer = digitsOnly(thread.id ?? "");
+            if (!customer) continue;
+            for (const m of thread.messages ?? []) {
+              const body = describeMessage(m);
+              if (!m.id || !body) continue;
+              const from = digitsOnly(m.from ?? "");
+              const out = (business && from === business) || (!!m.to && from !== customer);
+              history.push({
+                externalId: m.id,
+                customer,
+                direction: out ? "out" : "in",
+                body,
+                timestamp: toDate(m.timestamp),
+                status: out ? historyStatus(m.history_context?.status) : undefined,
+              });
+            }
+          }
+        }
+      } else if (change.field === "smb_app_state_sync") {
+        for (const s of v.state_sync ?? []) {
+          if (s.type && s.type !== "contact") continue;
+          const phone = digitsOnly(s.contact?.phone_number ?? s.contact?.wa_id ?? "");
+          if (!phone) continue;
+          const name = (s.contact?.full_name ?? s.contact?.first_name ?? "").trim() || undefined;
+          contacts.push({ phone, name, action: (s.action ?? "add").toLowerCase() });
+        }
+      }
+    }
+  }
+  return { echoes, history, contacts };
+}

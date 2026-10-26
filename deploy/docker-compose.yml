@@ -45,6 +45,8 @@ services:
       WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v22.0}
+      # Kill switch: NOTHING is sent to customers unless this is exactly "true".
+      WHATSAPP_SENDING_ENABLED: ${WHATSAPP_SENDING_ENABLED:-false}
     networks:
       - lotus_net
 

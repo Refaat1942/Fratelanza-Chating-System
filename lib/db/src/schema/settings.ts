@@ -21,6 +21,8 @@ export const settingsTable = pgTable("settings", {
   accentColor: text("accent_color"),
   // SLA threshold (in minutes) used for chat-monitoring "Late" status
   slaMinutes: integer("sla_minutes").notNull().default(15),
+  // Default content topics are inserted once; afterwards the admin owns them.
+  topicsSeeded: boolean("topics_seeded").notNull().default(false),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
