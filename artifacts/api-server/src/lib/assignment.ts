@@ -70,6 +70,7 @@ interface AgentRow {
   id: number;
   load: number;
   lastAssignedAt: Date | null;
+  maxChats: number | null;
 }
 
 /**
@@ -90,14 +91,15 @@ async function listAvailableAgents(
               WHERE ${conversationsTable.status} IN ('open','pending')
                 AND ${conversationsTable.assignedAgentId} = ${usersTable.id}), 0)::int`,
       lastAssignedAt: usersTable.lastAssignedAt,
+      maxChats: usersTable.maxChats,
     })
     .from(usersTable)
     .leftJoin(
       conversationsTable,
       eq(conversationsTable.assignedAgentId, usersTable.id),
     )
-    .where(and(eq(usersTable.role, "agent"), eq(usersTable.status, "available")))
-    .groupBy(usersTable.id, usersTable.lastAssignedAt);
+    .where(and(eq(usersTable.role, "agent"), eq(usersTable.status, "available"), eq(usersTable.isActive, true)))
+    .groupBy(usersTable.id, usersTable.lastAssignedAt, usersTable.maxChats);
 
   return excludeAgentId === undefined
     ? rows
@@ -157,9 +159,10 @@ export async function tryAutoAssign(
     if (conv.status === "completed") return { agentId: null, queued: false };
 
     // 2) Pick a candidate from currently-available agents.
-    const candidates = (await listAvailableAgents(tx as unknown as typeof db)).filter(
-      (a) => a.load < settings.maxChatsPerAgent,
-    );
+    // Each agent's own limit (Users & Roles) wins over the global default.
+    const capOf = (a: { maxChats: number | null }) => a.maxChats ?? settings.maxChatsPerAgent;
+    const pool = await listAvailableAgents(tx as unknown as typeof db);
+    const candidates = pool.filter((a) => a.load < capOf(a));
     const agentId = chooseAgent(candidates, settings.assignmentStrategy);
 
     if (agentId === null) {
@@ -183,7 +186,8 @@ export async function tryAutoAssign(
       })
       .from(conversationsTable)
       .where(eq(conversationsTable.assignedAgentId, agentId));
-    if (load >= settings.maxChatsPerAgent) {
+    const chosen = pool.find((a) => a.id === agentId);
+    if (load >= (chosen ? capOf(chosen) : settings.maxChatsPerAgent)) {
       // Another tx beat us to the last slot — queue and let drainQueue retry.
       await tx
         .update(conversationsTable)

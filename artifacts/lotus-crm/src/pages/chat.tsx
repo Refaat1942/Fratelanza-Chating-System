@@ -43,6 +43,7 @@ import {
   ListPlus,
   ChevronRight,
   Lock,
+  UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,7 +72,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { FaWhatsapp, FaFacebookMessenger, FaInstagram, FaSms } from "react-icons/fa";
 import { useLocation, useSearch } from "wouter";
-import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, type BulkAction } from "@/lib/api-extra";
+import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, type BulkAction } from "@/lib/api-extra";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -611,6 +612,7 @@ function BulkBar({
   onError: (msg: string) => void;
 }) {
   const bulk = useBulkConversations();
+  const { data: workload } = useWorkload(isAdmin);
   const [listName, setListName] = useState("");
   const [listOpen, setListOpen] = useState(false);
   const n = ids.length;
@@ -680,7 +682,30 @@ function BulkBar({
         <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} onClick={() => run({ action: "status", value: "completed" }, "Completed")}>
           <CheckCircle2 className="h-4 w-4 mr-1.5" /> Complete
         </Button>
-        {!isAdmin && (
+        {isAdmin ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} data-testid="bulk-assign">
+                <UserPlus className="h-4 w-4 mr-1.5" /> Assign to…
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64 max-h-80 overflow-y-auto">
+              {(workload ?? []).filter((u) => u.isActive).map((u) => {
+                const full = u.openChats + n > u.effectiveMax;
+                return (
+                  <DropdownMenuItem key={u.id} onClick={() => run({ action: "assign", value: u.id }, `Assigned to ${u.displayName || u.name}`)} data-testid={`bulk-assign-${u.id}`}>
+                    <span className="flex-1 truncate">{u.displayName || u.name}</span>
+                    <span className={cn("text-[11px] tabular-nums ml-2", full ? "text-destructive font-semibold" : "text-muted-foreground")} title={full ? "This would go over their limit" : "Open chats / limit"}>
+                      {u.openChats}/{u.effectiveMax}
+                    </span>
+                  </DropdownMenuItem>
+                );
+              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => run({ action: "assign", value: null }, "Returned to the queue")}>Back to queue (unassigned)</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
           <Button size="sm" variant="outline" className="h-9" disabled={!n || bulk.isPending} onClick={() => run({ action: "assignMe" }, "Claimed")}>
             Claim
           </Button>
@@ -1199,6 +1224,8 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const [replySearch, setReplySearch] = useState("");
   const { data: users } = useListUsers();
   const { data: me } = useGetMe();
+  const { data: workload } = useWorkload(me?.role === "admin");
+  const loadOf = (id: number) => workload?.find((w) => w.id === id);
   const { data: allTags } = useListTags();
   const customer = conv?.customer;
 
@@ -1213,6 +1240,7 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: getGetConversationQueryKey(conversationId) });
     queryClient.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: ["/api/users/workload"] });
   };
 
   const handleStatusChange = (status: string) => {
@@ -1306,7 +1334,10 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
                     <SelectContent>
                       <SelectItem value="unassigned">Unassigned</SelectItem>
                       {users?.filter((u) => (u as AppUser).isActive !== false).map(u => (
-                        <SelectItem key={u.id} value={String(u.id)}>{userLabel(u as AppUser)}</SelectItem>
+                        <SelectItem key={u.id} value={String(u.id)}>
+                          {userLabel(u as AppUser)}
+                          {loadOf(u.id) && <span className="text-muted-foreground"> · {loadOf(u.id)!.openChats}/{loadOf(u.id)!.effectiveMax}</span>}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

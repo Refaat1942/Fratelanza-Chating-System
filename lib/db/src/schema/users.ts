@@ -14,6 +14,9 @@ export const usersTable = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   // Set when an admin issues a temporary password: user must choose a new one.
   mustChangePassword: boolean("must_change_password").notNull().default(false),
+  // Max open+pending chats this person may hold. NULL = the global default
+  // from Settings → Chat Distribution.
+  maxChats: integer("max_chats"),
   status: text("status", { enum: ["available", "busy", "offline"] })
     .notNull()
     .default("available"),

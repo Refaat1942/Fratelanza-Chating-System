@@ -10,6 +10,7 @@ import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { tryAutoAssign } from "../lib/assignment";
 import { classifyConversation } from "../lib/topics";
+import { recordWebhookEvent } from "../lib/webhook-stats";
 import {
   digitsOnly,
   parseWhatsAppWebhook,
@@ -340,6 +341,22 @@ router.post("/webhooks/whatsapp", async (req, res) => {
   const io = getIo(req);
   const { messages, statuses } = parseWhatsAppWebhook(req.body);
   const sync = parseBusinessAppSync(req.body);
+
+  // Diagnostics: which webhook fields Meta actually sends (Settings → WhatsApp).
+  const fields = new Set<string>();
+  for (const e of (req.body?.entry ?? []) as { changes?: { field?: string }[] }[]) {
+    for (const c of e.changes ?? []) if (c.field) fields.add(c.field);
+  }
+  for (const f of fields) recordWebhookEvent(`field:${f}`);
+  recordWebhookEvent("customer_message", messages.length);
+  recordWebhookEvent("status_update", statuses.length);
+  recordWebhookEvent("phone_app_reply", sync.echoes.length);
+  recordWebhookEvent("history_message", sync.history.length);
+  recordWebhookEvent("contact_sync", sync.contacts.length);
+  logger.info(
+    { fields: [...fields], messages: messages.length, statuses: statuses.length, echoes: sync.echoes.length, history: sync.history.length },
+    "WhatsApp webhook received",
+  );
 
   for (const m of sync.echoes) {
     try { await importSyncedMessage(m, "echo", io); }

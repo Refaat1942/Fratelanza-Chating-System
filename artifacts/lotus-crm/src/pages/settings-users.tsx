@@ -24,6 +24,7 @@ import { useAuth } from "@/lib/auth";
 import { EmptyState, ErrorState } from "@/components/states";
 import { initials, roleLabel, userLabel, type AppUser } from "@/lib/types";
 import { PasswordField } from "@/components/password-field";
+import { useWorkload } from "@/lib/api-extra";
 
 const json = { "Content-Type": "application/json" };
 const errMsg = (e: unknown, fallback: string) => (e as { data?: { error?: string } }).data?.error ?? fallback;
@@ -49,6 +50,8 @@ export function UsersSettings() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { data: users, isLoading, isError, refetch } = useUsers();
+  const { data: workload } = useWorkload();
+  const loadOf = (id: number) => workload?.find((w) => w.id === id);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "inactive">("all");
   const [editing, setEditing] = useState<AppUser | "new" | null>(null);
@@ -56,7 +59,10 @@ export function UsersSettings() {
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: getListUsersQueryKey() });
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["/api/users/workload"] });
+    return qc.invalidateQueries({ queryKey: getListUsersQueryKey() });
+  };
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -163,6 +169,16 @@ export function UsersSettings() {
                       {active ? "Active" : "Inactive"}
                     </Badge>
                     {u.mustChangePassword && <Badge variant="outline" className="text-[11px] h-5 border-warning/40 text-warning bg-warning/10">Must change password</Badge>}
+                    {loadOf(u.id) && (
+                      <Badge
+                        variant="outline"
+                        className={`text-[11px] h-5 tabular-nums ${loadOf(u.id)!.openChats >= loadOf(u.id)!.effectiveMax ? "border-destructive/40 text-destructive bg-destructive/10" : ""}`}
+                        title={u.maxChats ? "Personal limit" : "Uses the default limit from Chat Distribution"}
+                        data-testid={`user-load-${u.id}`}
+                      >
+                        {loadOf(u.id)!.openChats}/{loadOf(u.id)!.effectiveMax} chats{u.maxChats ? "" : " (default)"}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 truncate">{u.email}</p>
                 </div>
@@ -248,6 +264,7 @@ function UserFormDialog({
   const [email, setEmail] = useState(user?.email ?? "");
   const [role, setRole] = useState<"admin" | "agent">((user?.role as "admin" | "agent") ?? "agent");
   const [password, setPassword] = useState(isNew ? tempPassword() : "");
+  const [maxChats, setMaxChats] = useState<string>(user?.maxChats ? String(user.maxChats) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -257,18 +274,22 @@ function UserFormDialog({
     if (!name.trim()) return setError("Enter the user's full name.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setError("Enter a valid email address.");
     if (isNew && password.length < 8) return setError("Temporary password must be at least 8 characters.");
+    if (maxChats !== "" && !(Number.isInteger(Number(maxChats)) && Number(maxChats) >= 1 && Number(maxChats) <= 200)) {
+      return setError("Max open chats must be a whole number from 1 to 200, or empty for the default.");
+    }
+    const cap = maxChats === "" ? null : Number(maxChats);
     setBusy(true);
     try {
       if (isNew) {
         await customFetch("/api/users", {
           method: "POST", headers: json,
-          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), role, password }),
+          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), role, password, maxChats: cap }),
         });
         toast({ title: "User created", description: "They will choose their own password at first sign-in." });
       } else {
         await customFetch(`/api/users/${user!.id}`, {
           method: "PUT", headers: json,
-          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), ...(isSelf ? {} : { role }) }),
+          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), maxChats: cap, ...(isSelf ? {} : { role }) }),
         });
         toast({ title: "User updated" });
       }
@@ -310,6 +331,22 @@ function UserFormDialog({
               </SelectContent>
             </Select>
             {isSelf && <p className="text-xs text-muted-foreground">You cannot change your own role.</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="u-max">Max open chats <span className="text-muted-foreground font-normal">(queue limit)</span></Label>
+            <Input
+              id="u-max"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={200}
+              value={maxChats}
+              onChange={(e) => setMaxChats(e.target.value)}
+              placeholder="Empty = default from Chat Distribution"
+              className="h-11 max-w-[260px]"
+              data-testid="input-max-chats"
+            />
+            <p className="text-xs text-muted-foreground">Automatic distribution never gives this person more open chats than this. Admins can still assign more by hand.</p>
           </div>
           {isNew && (
             <div className="space-y-1.5">
