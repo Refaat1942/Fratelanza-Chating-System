@@ -5,6 +5,7 @@ export interface AppUser extends User {
   displayName?: string | null;
   isActive?: boolean;
   mustChangePassword?: boolean;
+  maxChats?: number | null;
 }
 
 /** Name shown everywhere in the UI — never the email. */

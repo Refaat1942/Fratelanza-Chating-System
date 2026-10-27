@@ -553,6 +553,31 @@ export function useUpdateMyAvailability() {
 // ---------------------------------------------------------------------------
 export interface SystemStatus {
   outboundEnabled: boolean;
+  sendingConfigured?: boolean;
+  webhooks?: { since: string; events: Record<string, { count: number; lastAt: string }> };
+}
+
+export interface Workload {
+  id: number;
+  name: string;
+  displayName: string | null;
+  role: string;
+  status: string;
+  isActive: boolean;
+  maxChats: number | null;
+  effectiveMax: number;
+  defaultMax: number;
+  openChats: number;
+}
+
+/** Admin-only: open chats per person vs. their limit. */
+export function useWorkload(enabled = true) {
+  return useQuery({
+    queryKey: ["/api/users/workload"],
+    queryFn: () => customFetch<Workload[]>("/api/users/workload"),
+    enabled,
+    staleTime: 10_000,
+  });
 }
 
 export function useSystemStatus() {
@@ -567,7 +592,8 @@ export type BulkAction =
   | { action: "topic"; value: number | null }
   | { action: "addTag" | "removeTag"; value: string }
   | { action: "status"; value: "open" | "pending" | "completed" }
-  | { action: "read" | "assignMe"; value?: undefined };
+  | { action: "read" | "assignMe"; value?: undefined }
+  | { action: "assign"; value: number | null };
 
 export function useBulkConversations() {
   const qc = useQueryClient();
@@ -582,6 +608,7 @@ export function useBulkConversations() {
       void qc.invalidateQueries({ queryKey: ["/api/conversations"] });
       void qc.invalidateQueries({ queryKey: ["/api/inbox/sync"] });
       void qc.invalidateQueries({ queryKey: ["/api/insights"] });
+      void qc.invalidateQueries({ queryKey: ["/api/users/workload"] });
     },
   });
 }

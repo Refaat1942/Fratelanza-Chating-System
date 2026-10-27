@@ -202,6 +202,20 @@ router.post("/conversations/bulk", requireAuth, requirePermission("canSendMessag
     case "assignMe":
       result = await db.execute(sql`UPDATE conversations SET assigned_agent_id = ${user.id}, queued_at = NULL WHERE id IN (${idList})${scope}`);
       break;
+    case "assign": {
+      // Admin hands chats to a specific person (or back to the queue with null).
+      // Limits apply to automatic distribution; an admin may deliberately exceed them.
+      if (!isAdmin) { res.status(403).json({ error: "Only admins can assign chats to other people" }); return; }
+      if (value === null) {
+        result = await db.execute(sql`UPDATE conversations SET assigned_agent_id = NULL, status = CASE WHEN status = 'completed' THEN status ELSE 'pending' END, queued_at = COALESCE(queued_at, NOW()) WHERE id IN (${idList})`);
+        break;
+      }
+      if (!(Number.isInteger(value) && value > 0)) { res.status(400).json({ error: "value must be a user id or null" }); return; }
+      const [target] = await db.select({ id: usersTable.id, isActive: usersTable.isActive }).from(usersTable).where(eq(usersTable.id, value));
+      if (!target || !target.isActive) { res.status(400).json({ error: "That user does not exist or is deactivated" }); return; }
+      result = await db.execute(sql`UPDATE conversations SET assigned_agent_id = ${value}, queued_at = NULL, status = CASE WHEN status = 'pending' AND assigned_agent_id IS NULL THEN 'open' ELSE status END WHERE id IN (${idList})`);
+      break;
+    }
     default:
       res.status(400).json({ error: "Unknown action" });
       return;

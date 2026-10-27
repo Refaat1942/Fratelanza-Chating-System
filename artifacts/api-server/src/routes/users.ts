@@ -2,7 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { usersTable, passwordResetTokensTable } from "@workspace/db";
+import { usersTable, passwordResetTokensTable, settingsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, AuthRequest } from "../middlewares/auth";
 import { drainQueue } from "../lib/assignment";
 import { newResetToken, validatePassword } from "../lib/passwords";
@@ -19,8 +19,17 @@ const publicUserCols = {
   status: usersTable.status,
   isActive: usersTable.isActive,
   mustChangePassword: usersTable.mustChangePassword,
+  maxChats: usersTable.maxChats,
   createdAt: usersTable.createdAt,
 } as const;
+
+/** null/"" = use the global default; otherwise 1–200 open chats. */
+function parseMaxChats(v: unknown): number | null | undefined | "invalid" {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 200 ? n : "invalid";
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESET_TTL_MS = 60 * 60 * 1000;
@@ -42,6 +51,28 @@ async function activeAdminCount(exceptId?: number): Promise<number> {
   return n;
 }
 
+// Workload per person: open+pending chats vs. their limit (admin assignment UI).
+router.get("/users/workload", requireAuth, requireAdmin, async (_req, res) => {
+  const [settings] = await db.select({ max: settingsTable.maxChatsPerAgent }).from(settingsTable).where(eq(settingsTable.id, 1));
+  const rows = await db
+    .select({
+      id: usersTable.id,
+      name: usersTable.name,
+      displayName: usersTable.displayName,
+      role: usersTable.role,
+      status: usersTable.status,
+      isActive: usersTable.isActive,
+      maxChats: usersTable.maxChats,
+      // Written out in full: inside a one-table select the ORM drops the table name,
+      // which would make this compare against the conversation's own id.
+      openChats: sql<number>`(SELECT COUNT(*)::int FROM conversations c WHERE c.assigned_agent_id = "users"."id" AND c.status IN ('open','pending'))`,
+    })
+    .from(usersTable)
+    .orderBy(usersTable.name);
+  const def = settings?.max ?? 5;
+  res.json(rows.map((r) => ({ ...r, effectiveMax: r.maxChats ?? def, defaultMax: def })));
+});
+
 router.get("/users", requireAuth, async (req: AuthRequest, res) => {
   const rows = await db.select(publicUserCols).from(usersTable).orderBy(usersTable.createdAt);
   // Agents only need names (assignment pickers); emails stay admin-only.
@@ -53,7 +84,9 @@ router.get("/users", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/users", requireAuth, requireAdmin, async (req, res) => {
-  const { name, displayName, email, password, role } = req.body ?? {};
+  const { name, displayName, email, password, role, maxChats } = req.body ?? {};
+  const cap = parseMaxChats(maxChats);
+  if (cap === "invalid") { res.status(400).json({ error: "Max chats must be between 1 and 200 (or empty for the default)" }); return; }
   if (typeof name !== "string" || !name.trim() || typeof email !== "string" || !email.trim()) {
     res.status(400).json({ error: "Full name and email are required" });
     return;
@@ -86,6 +119,7 @@ router.post("/users", requireAuth, requireAdmin, async (req, res) => {
       role,
       // An admin-chosen password is temporary: the user picks their own at first login.
       mustChangePassword: true,
+      maxChats: cap ?? null,
     })
     .returning(publicUserCols);
   res.status(201).json(user);
@@ -127,7 +161,9 @@ router.get("/users/:id", requireAuth, async (req, res) => {
 router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const { name, displayName, email, role, password } = req.body ?? {};
+  const { name, displayName, email, role, password, maxChats } = req.body ?? {};
+  const cap = parseMaxChats(maxChats);
+  if (cap === "invalid") { res.status(400).json({ error: "Max chats must be between 1 and 200 (or empty for the default)" }); return; }
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   if (!existing) { res.status(404).json({ error: "Not found" }); return; }
 
@@ -162,6 +198,7 @@ router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res
     }
     updates.role = role;
   }
+  if (cap !== undefined) updates.maxChats = cap;
   if (password) {
     const bad = validatePassword(password);
     if (bad) { res.status(400).json({ error: bad }); return; }
@@ -175,6 +212,8 @@ router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res
     return;
   }
   const [user] = await db.update(usersTable).set(updates).where(eq(usersTable.id, id)).returning(publicUserCols);
+  // A raised limit may free room for queued chats.
+  if (cap !== undefined) void drainQueue(req.app.get("io") as IOServer | undefined);
   res.json(user);
 });
 

@@ -49,6 +49,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { UsersSettings } from "@/pages/settings-users";
 import { BrandingSettings } from "@/pages/settings-branding";
 import { TopicsSettings } from "@/pages/settings-topics";
+import { WhatsAppSettings } from "@/pages/settings-whatsapp";
+import { Smartphone } from "lucide-react";
 
 type SettingsSection = {
   value: string;
@@ -67,6 +69,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "chat-reason-categories",  group: "Reasons",       label: "Reason Categories",   icon: FolderOpen,    Component: ChatReasonCategoriesSettings },
   { value: "chat-reasons",            group: "Workflow",      label: "Chat Topics",         icon: MessageCircle, Component: TopicsSettings },
   { value: "not-ready",               group: "Reasons",       label: "Not Ready Reasons",   icon: Coffee,        Component: NotReadyReasonsSettings },
+  { value: "whatsapp",                group: "Workflow",      label: "WhatsApp",            icon: Smartphone,    Component: WhatsAppSettings },
   { value: "branding",                group: "Appearance",    label: "Branding",            icon: Palette,       Component: BrandingSettings },
 ];
 
@@ -494,7 +497,7 @@ function ChatDistributionSettings() {
               {/* Max chats slider */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label className="text-sm font-medium">Max chats per agent</Label>
+                  <Label className="text-sm font-medium">Default max chats per agent</Label>
                   <span className="text-sm font-semibold text-primary">{maxChats}</span>
                 </div>
                 <Slider
@@ -507,7 +510,7 @@ function ChatDistributionSettings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   An agent will not receive a new chat once they have this many open or pending
-                  conversations.
+                  conversations. Set a different limit for one person in Users &amp; Roles → Edit → “Max open chats”.
                 </p>
               </div>
 

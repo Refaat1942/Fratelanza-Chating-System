@@ -27,17 +27,18 @@ Behaviour notes
 
 Do not commit tokens; `deploy/.env` is git-ignored.
 
-## Sending is OFF by default (safety switch)
-`WHATSAPP_SENDING_ENABLED` in `deploy/.env` controls whether the CRM may send
-anything to customers. While it is `false` (the default, and also when the line
-is missing):
-* replies typed in the inbox are saved as **internal notes only** — the API
-  refuses customer-facing messages (HTTP 403 `OUTBOUND_DISABLED`);
-* campaigns cannot be sent and scheduled campaigns stay waiting;
-* receiving messages, delivery receipts, phone-app sync and history import keep working.
+## Sending (on by default) and the emergency stop
+Replies typed in the inbox are sent to customers normally. To stop ALL sending
+in an emergency, add `WHATSAPP_SENDING_ENABLED=false` to `deploy/.env` and run
+`cd /opt/fratelanza-chat/deploy && docker compose up -d`. While stopped, replies
+become internal notes and campaigns are blocked; receiving keeps working.
+Remove the line (or set `true`) and run the same command to send again.
+Settings → WhatsApp shows the current state.
 
-To allow sending later: set `WHATSAPP_SENDING_ENABLED=true` and run
-`cd /opt/fratelanza-chat/deploy && docker compose up -d`.
+## Diagnostics
+Settings → WhatsApp lists which webhook events Meta has delivered since the
+server started (customer messages, receipts, phone-app replies, history,
+contact names) — the quickest way to see why something does not sync.
 
 ## Sync with the WhatsApp Business app on your phone (Coexistence)
 If the same number is used in the **WhatsApp Business app and the Cloud API**
