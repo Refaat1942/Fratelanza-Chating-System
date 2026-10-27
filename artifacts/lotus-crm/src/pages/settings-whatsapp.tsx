@@ -1,13 +1,13 @@
 import React from "react";
 import { formatDistanceToNow, parseISO } from "date-fns";
-import { CheckCircle2, XCircle, RefreshCw, Smartphone } from "lucide-react";
+import { CheckCircle2, XCircle, Circle, RefreshCw, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSystemStatus } from "@/lib/api-extra";
 import { useQueryClient } from "@tanstack/react-query";
 
 const KINDS: { key: string; label: string; ifMissing: string }[] = [
-  { key: "customer_message", label: "Customer messages", ifMissing: "No customer message received since the server started." },
+  { key: "customer_message", label: "Customer messages", ifMissing: "None counted yet — this fills in as soon as a customer writes to your number." },
   { key: "status_update", label: "Delivery / read receipts", ifMissing: "No receipts yet — they arrive after you send a reply." },
   {
     key: "phone_app_reply",
@@ -16,7 +16,7 @@ const KINDS: { key: string; label: string; ifMissing: string }[] = [
       "Meta has not sent any. This only works when your number is in Coexistence mode (WhatsApp Business app + Cloud API on the same number) AND “smb_message_echoes” is ticked in Meta → WhatsApp → Configuration → Webhook fields.",
   },
   { key: "history_message", label: "Imported chat history", ifMissing: "History is sent once, only during Coexistence onboarding (field “history”)." },
-  { key: "contact_sync", label: "Contact names from the phone", ifMissing: "Needs Coexistence and the “smb_app_state_sync” webhook field." },
+  { key: "contact_sync", label: "Contact names from the phone", ifMissing: "Normal until you add or edit a contact in the WhatsApp Business phone app — Meta only sends names then (field “smb_app_state_sync”)." },
 ];
 
 function when(iso?: string) {
@@ -65,17 +65,17 @@ export function WhatsAppSettings() {
             <RefreshCw className={`h-4 w-4 mr-1.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">Counted since the server last started ({when(data.webhooks?.since)}). Send yourself a test from the phone, then press Refresh.</p>
+        <p className="text-xs text-muted-foreground">Counted since {when(data.webhooks?.since)} (kept across restarts). A grey circle means “nothing received yet”, not an error. Send yourself a test from the phone, then press Refresh.</p>
         <ul className="divide-y divide-border">
           {KINDS.map((k) => {
             const s = ev[k.key];
             return (
               <li key={k.key} className="py-3 flex items-start gap-3" data-testid={`wa-kind-${k.key}`}>
-                {s ? <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" /> : <XCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />}
+                {s ? <CheckCircle2 className="h-4 w-4 text-success shrink-0 mt-0.5" /> : <Circle className="h-4 w-4 text-muted-foreground/60 shrink-0 mt-0.5" aria-label="Nothing yet" />}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <p className="text-sm font-medium">{k.label}</p>
-                    <p className="text-xs tabular-nums text-muted-foreground">{s ? `${s.count} · last ${when(s.lastAt)}` : "none"}</p>
+                    <p className="text-xs tabular-nums text-muted-foreground">{s ? `${s.count} · last ${when(s.lastAt)}` : "nothing yet"}</p>
                   </div>
                   {!s && <p className="text-xs text-muted-foreground mt-0.5">{k.ifMissing}</p>}
                 </div>

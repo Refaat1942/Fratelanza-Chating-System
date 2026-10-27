@@ -1,4 +1,4 @@
-import { pgTable, integer, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, integer, text, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 /**
  * Single-row configuration table (id always = 1).
@@ -23,6 +23,8 @@ export const settingsTable = pgTable("settings", {
   slaMinutes: integer("sla_minutes").notNull().default(15),
   // Default content topics are inserted once; afterwards the admin owns them.
   topicsSeeded: boolean("topics_seeded").notNull().default(false),
+  // Settings → WhatsApp diagnostics counters, kept across restarts.
+  webhookStats: jsonb("webhook_stats"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

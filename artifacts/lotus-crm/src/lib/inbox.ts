@@ -97,7 +97,7 @@ export function useInboxSync(enabled: boolean) {
 
   // Unread count in the browser tab title.
   useEffect(() => {
-    const base = document.title.replace(/^\(\d+\)\s*/, "");
+    const base = document.title.replace(/^(\(\d+\+?\)\s*)+/, "");
     const n = query.data?.unread ?? 0;
     document.title = n > 0 ? `(${n > 99 ? "99+" : n}) ${base}` : base;
   }, [query.data?.unread]);

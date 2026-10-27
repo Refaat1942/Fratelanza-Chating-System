@@ -84,7 +84,24 @@ interface MetaMessage {
   document?: { caption?: string; filename?: string };
   location?: { latitude?: number; longitude?: number; name?: string };
   reaction?: { emoji?: string };
+  // type "unsupported": content the Cloud API does not pass on (polls,
+  // view-once media, edits, …). Meta may say which kind in `unsupported.type`.
+  unsupported?: { type?: string };
+  errors?: { code?: number; title?: string; error_data?: { details?: string } }[];
 }
+
+/** Friendly names for kinds Meta reports as unsupported. */
+const UNSUPPORTED_KINDS: Record<string, string> = {
+  poll_creation: "poll",
+  poll: "poll",
+  poll_update: "poll vote",
+  view_once: "view-once photo/video",
+  edit: "edited message",
+  event: "event",
+  event_creation: "event",
+  ephemeral: "disappearing message",
+  album: "album",
+};
 
 function describeMessage(m: MetaMessage): string | null {
   switch (m.type) {
@@ -114,6 +131,13 @@ function describeMessage(m: MetaMessage): string | null {
       return "[Contact card]";
     case "reaction":
       return null; // reactions are not chat messages
+    case "unsupported": {
+      const kind = m.unsupported?.type;
+      const what = kind ? (UNSUPPORTED_KINDS[kind] ?? kind.replace(/_/g, " ")) : "";
+      return `[${what ? `${what[0].toUpperCase()}${what.slice(1)} — ` : ""}WhatsApp doesn't pass this message type to connected apps. Open WhatsApp on the phone to see it]`;
+    }
+    case "system":
+      return "[WhatsApp system notice]";
     default:
       return `[Unsupported message type: ${m.type ?? "unknown"}]`;
   }
