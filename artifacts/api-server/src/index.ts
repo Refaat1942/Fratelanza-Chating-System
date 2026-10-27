@@ -10,6 +10,7 @@ import { bootstrapSeed } from "./lib/bootstrap-seed";
 import { JWT_SECRET } from "./middlewares/auth";
 import { processDueScheduledCampaigns } from "./lib/campaign-sender";
 import { bootTopics } from "./lib/topics";
+import { loadWebhookStats } from "./lib/webhook-stats";
 
 interface AuthedSocket extends Socket {
   data: { userId: number; role: "admin" | "agent" };
@@ -149,6 +150,7 @@ io.on("connection", (rawSocket) => {
 httpServer.listen(port, async () => {
   logger.info({ port }, "Server listening");
   await bootstrapSeed();
+  void loadWebhookStats(); // Settings → WhatsApp counters survive restarts
   void bootTopics(); // seed default topics once + file existing chats (background)
   setInterval(() => {
     void processDueScheduledCampaigns().catch((err) =>

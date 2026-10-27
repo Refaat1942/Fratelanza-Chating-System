@@ -20,7 +20,7 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const name = branding?.companyName?.trim() || DEFAULT_TITLE;
-    const unread = /^\((\d+\+?)\)\s*/.exec(document.title)?.[0] ?? "";
+    const unread = /^\(\d+\+?\)\s*/.exec(document.title)?.[0] ?? ""; // one badge only
     document.title = `${unread}${name}`;
     {
       const logo = branding?.logoUrl ?? "/favicon.png";
