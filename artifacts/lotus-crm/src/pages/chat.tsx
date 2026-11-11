@@ -1073,14 +1073,14 @@ function ChatCenter({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {isMonitoring && (
-            <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-whisper/40 bg-whisper/10 px-2 py-0.5 text-[11px] font-medium text-whisper" data-testid="badge-monitoring">
+            <span className="hidden 2xl:inline-flex items-center gap-1 rounded-full border border-whisper/40 bg-whisper/10 px-2 py-0.5 text-[11px] font-medium text-whisper" data-testid="badge-monitoring">
               <Eye className="h-3 w-3" aria-hidden /> Monitoring
             </span>
           )}
           {isMonitoring && perms?.canTakeover && conv?.status !== "completed" && takeoverFrom === null && (
-            <Button size="sm" variant="outline" className="h-9" onClick={handleTakeover} disabled={takeoverMut.isPending} data-testid="btn-takeover">
-              <ShieldCheck className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Take over</span>
+            <Button size="sm" variant="outline" className="h-9" onClick={handleTakeover} disabled={takeoverMut.isPending} aria-label="Take over" title="Take over" data-testid="btn-takeover">
+              <ShieldCheck className="h-4 w-4 xl:mr-2" />
+              <span className="hidden xl:inline">Take over</span>
             </Button>
           )}
           {iHoldTakeover && (
@@ -1090,9 +1090,9 @@ function ChatCenter({
             </Button>
           )}
           {conv && conv.status !== "completed" && (isAssignedToMe || isAdmin) && (
-            <Button size="sm" variant="outline" className="h-9" onClick={handleResolve} disabled={resolveMut.isPending} data-testid="btn-resolve">
-              <CheckCircle2 className="h-4 w-4 sm:mr-2 text-success" />
-              <span className="hidden sm:inline">Resolve</span>
+            <Button size="sm" variant="outline" className="h-9" onClick={handleResolve} disabled={resolveMut.isPending} aria-label="Resolve" title="Resolve" data-testid="btn-resolve">
+              <CheckCircle2 className="h-4 w-4 xl:mr-2 text-success" />
+              <span className="hidden xl:inline">Resolve</span>
             </Button>
           )}
           {showDetailsButton && (

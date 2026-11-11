@@ -102,7 +102,7 @@ export function OrderDialog({ orderId, onClose }: { orderId: number; onClose: ()
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-lg max-h-[92dvh] overflow-y-auto">
-        {!o ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+        {!o ? <><DialogTitle className="sr-only">Loading order</DialogTitle><Loader2 className="h-5 w-5 animate-spin" /></> : (
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">Order {o.order_number} <Badge variant="outline" className={STATUS_TONE[o.status]}>{STATUS_LABEL[o.status]}</Badge></DialogTitle>

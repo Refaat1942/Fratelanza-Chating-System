@@ -367,7 +367,7 @@ function Simulator({ bot }: { bot: Omit<BotRow, "id"> }) {
   const endRef = useRef<HTMLDivElement>(null);
   const { data: teams } = useTeams();
   const { data: topics } = useChatReasons();
-  useEffect(() => endRef.current?.scrollIntoView({ block: "end" }), [lines.length]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [lines.length]);
 
   const describe = (t: SimTurn) => {
     const out: string[] = [];
