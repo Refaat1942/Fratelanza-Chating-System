@@ -964,7 +964,7 @@ function ChatCenter({
     return m ? parseISO(m.createdAt) : null;
   }, [messages]);
   const outsideWindow =
-    channel === "whatsapp" && !isNote && (!lastCustomerAt || differenceInHours(new Date(), lastCustomerAt) >= 24);
+    ["whatsapp", "messenger", "instagram"].includes(channel) && !isNote && (!lastCustomerAt || differenceInHours(new Date(), lastCustomerAt) >= 24);
 
   // ---- grouped rows with date separators ----
   const rows = useMemo(() => {
@@ -1126,7 +1126,7 @@ function ChatCenter({
                     {msg.attachments && msg.attachments.length > 0 && (
                       <div className="mt-1.5 flex flex-col gap-1">
                         {msg.attachments.map((url, i) =>
-                          /^data:image|\.(png|jpe?g|gif|webp)$/i.test(url) ? (
+                          /^data:image|\.(png|jpe?g|gif|webp)(\?|$)/i.test(url) ? (
                             <img key={i} src={url} alt="Attachment" className="rounded-lg max-h-56 object-contain" loading="lazy" />
                           ) : (
                             <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="text-xs underline break-all">Attachment {i + 1}</a>
@@ -1200,7 +1200,7 @@ function ChatCenter({
         <div className="bg-card border-t border-border px-2 sm:px-4 pt-2 pb-2 pb-safe">
           {outsideWindow && (
             <p role="status" className="max-w-3xl mx-auto mb-2 rounded-md bg-warning/10 border border-warning/30 px-3 py-1.5 text-xs text-warning">
-              More than 24 hours since the customer's last message — WhatsApp may reject a normal reply. Use an internal note, or wait for the customer to write.
+              More than 24 hours since the customer's last message — {CHANNEL_NAMES[channel] ?? "the channel"} may reject a normal reply. Use an internal note, or wait for the customer to write.
             </p>
           )}
           {!conv?.assignedAgentId && isAdmin && (

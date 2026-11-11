@@ -7,6 +7,7 @@ import { requirePermission } from "../middlewares/permissions";
 import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { sendWhatsAppText, whatsappSendingConfigured } from "../lib/whatsapp";
+import { sendSocialText, socialSendingConfigured } from "../lib/meta-social";
 import { outboundEnabled, OUTBOUND_DISABLED_ERROR } from "../lib/outbound";
 import { canReadConversation, canSendInConversation } from "../lib/access";
 
@@ -108,29 +109,43 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
       .where(eq(conversationsTable.id, convId));
   }
 
-  // Deliver through the WhatsApp Cloud API. Internal notes never leave the CRM.
-  // On failure the message stays in the thread flagged "failed" so the agent
-  // can see it was NOT delivered (e.g. outside the 24h customer-service window).
+  // Deliver through the conversation's channel (WhatsApp Cloud API, or the
+  // Messenger/Instagram Send API). Internal notes never leave the CRM. On
+  // failure the message stays in the thread flagged "failed" so the agent can
+  // see it was NOT delivered (e.g. outside the 24h customer-service window).
   let delivered: typeof message = message;
   let deliveryError: string | undefined;
-  if (!isNote && outboundEnabled() && whatsappSendingConfigured()) {
+  if (!isNote && outboundEnabled()) {
     const [target] = await db
-      .select({ channel: conversationsTable.channel, phone: customersTable.phone })
+      .select({
+        channel: conversationsTable.channel,
+        phone: customersTable.phone,
+        messengerPsid: customersTable.messengerPsid,
+        instagramId: customersTable.instagramId,
+      })
       .from(conversationsTable)
       .leftJoin(customersTable, eq(conversationsTable.customerId, customersTable.id))
       .where(eq(conversationsTable.id, convId))
       .limit(1);
-    if (target?.channel === "whatsapp" && target.phone) {
+    let send: (() => Promise<{ externalId: string }>) | null = null;
+    if (target?.channel === "whatsapp" && target.phone && whatsappSendingConfigured()) {
+      send = () => sendWhatsAppText(target.phone!, body);
+    } else if (target?.channel === "messenger" && target.messengerPsid && socialSendingConfigured("messenger")) {
+      send = () => sendSocialText("messenger", target.messengerPsid!, body);
+    } else if (target?.channel === "instagram" && target.instagramId && socialSendingConfigured("instagram")) {
+      send = () => sendSocialText("instagram", target.instagramId!, body);
+    }
+    if (send) {
       try {
-        const { externalId } = await sendWhatsAppText(target.phone, body);
+        const { externalId } = await send();
         [delivered] = await db
           .update(messagesTable)
           .set({ externalId })
           .where(eq(messagesTable.id, message.id))
           .returning();
       } catch (err) {
-        deliveryError = err instanceof Error ? err.message : "WhatsApp send failed";
-        logger.error({ err, messageId: message.id }, "WhatsApp send failed");
+        deliveryError = err instanceof Error ? err.message : "Send failed";
+        logger.error({ err, messageId: message.id, channel: target?.channel }, "Outbound send failed");
         [delivered] = await db
           .update(messagesTable)
           .set({ status: "failed" })

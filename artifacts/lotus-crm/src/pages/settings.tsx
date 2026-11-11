@@ -16,7 +16,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, parseISO } from "date-fns";
-import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History } from "lucide-react";
+import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History, Radio } from "lucide-react";
 import {
   useRolePermissions, useUpdateRolePermissions, type RolePermissions as RolePerms, type RoleName,
   useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason,
@@ -51,6 +51,7 @@ import { BrandingSettings } from "@/pages/settings-branding";
 import { TopicsSettings } from "@/pages/settings-topics";
 import { WhatsAppSettings } from "@/pages/settings-whatsapp";
 import { ActivityLogSettings } from "@/pages/settings-activity";
+import { ChannelsSettings } from "@/pages/settings-channels";
 import { Smartphone } from "lucide-react";
 
 type SettingsSection = {
@@ -70,12 +71,13 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "chat-reason-categories",  group: "Reasons",       label: "Reason Categories",   icon: FolderOpen,    Component: ChatReasonCategoriesSettings },
   { value: "chat-reasons",            group: "Workflow",      label: "Chat Topics",         icon: MessageCircle, Component: TopicsSettings },
   { value: "not-ready",               group: "Reasons",       label: "Not Ready Reasons",   icon: Coffee,        Component: NotReadyReasonsSettings },
-  { value: "whatsapp",                group: "Workflow",      label: "WhatsApp",            icon: Smartphone,    Component: WhatsAppSettings },
+  { value: "channels",                group: "Channels",      label: "Channels",            icon: Radio,         Component: ChannelsSettings },
+  { value: "whatsapp",                group: "Channels",      label: "WhatsApp diagnostics", icon: Smartphone,   Component: WhatsAppSettings },
   { value: "branding",                group: "Appearance",    label: "Branding",            icon: Palette,       Component: BrandingSettings },
   { value: "activity",                group: "Security",      label: "Activity Log",        icon: History,       Component: ActivityLogSettings },
 ];
 
-const SETTINGS_GROUPS = ["Team", "Workflow", "Reasons", "Appearance", "Security"] as const;
+const SETTINGS_GROUPS = ["Team", "Workflow", "Reasons", "Channels", "Appearance", "Security"] as const;
 
 export default function SettingsPage() {
   const [active, setActive] = React.useState<string>("users");

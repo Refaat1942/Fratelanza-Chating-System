@@ -22,6 +22,7 @@ import customerAiRouter from "./customer-ai";
 import userPermissionsRouter from "./user-permissions";
 import systemRouter from "./system";
 import supervisionRouter from "./supervision";
+import channelsRouter from "./channels";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use(chatReasonsRouter);
 router.use(notReadyReasonsRouter);
 router.use(meRouter);
 router.use(supervisionRouter);
+router.use(channelsRouter);
 
 export default router;
