@@ -7,7 +7,9 @@ import {
   getListCustomersQueryKey,
   getGetCustomerQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { customFetch, type Customer } from "@workspace/api-client-react";
+import { CustomerFieldsCard, CustomerTimeline, DuplicatesDialog, ExportButton, ImportDialog } from "@/components/crm-extras";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -64,13 +66,27 @@ const createCustomerSchema = z.object({
 export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("all");
+  const [segment, setSegment] = useState("all");
+  const [channelFilter, setChannelFilter] = useState("all");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
 
-  const { data: customers, isLoading } = useListCustomers({
-    search: search || undefined,
-    branch: branchFilter === "all" ? undefined : branchFilter,
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (branchFilter !== "all") params.set("branch", branchFilter);
+  if (segment !== "all") params.set("segment", segment);
+  if (channelFilter !== "all") params.set("channel", channelFilter);
+  const { data: customers, isLoading } = useQuery({
+    queryKey: ["/api/customers", "list", params.toString()],
+    queryFn: () => customFetch<(Customer & { email?: string | null; conversationCount?: number; lastActivity?: string | null })[]>(`/api/customers?${params}`),
   });
+  // Branch choices come from the data (no hard-coded branch names).
+  const { data: allForBranches } = useQuery({
+    queryKey: ["/api/customers", "branches"],
+    queryFn: () => customFetch<Customer[]>("/api/customers"),
+    staleTime: 60_000,
+  });
+  const branches = [...new Set((allForBranches ?? []).map((c) => c.branch).filter((b): b is string => !!b))].sort();
 
   if (selectedCustomerId !== null) {
     return (
@@ -82,22 +98,39 @@ export default function CustomersPage() {
   }
 
   return (
-    <div className="flex-1 space-y-6 p-8 overflow-y-auto">
-      <div className="flex items-center justify-between">
+    <div className="flex-1 space-y-6 p-4 sm:p-8 overflow-y-auto">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Customers</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Customers</h2>
           <p className="text-muted-foreground">
-            Manage and view customer histories across all branches.
+            Profiles, history and segments across every channel.
           </p>
         </div>
-        <CreateCustomerDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        <div className="flex flex-wrap gap-2">
+          <ImportDialog />
+          <ExportButton />
+          <DuplicatesDialog />
+          <CreateCustomerDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-card p-4 rounded-xl border border-border shadow-sm">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Segments">
+        {[
+          ["all", "All"], ["new", "New (30 days)"], ["returning", "Returning"], ["inactive", "Inactive (60 days)"], ["blocked", "Blocked"],
+        ].map(([v, l]) => (
+          <button key={v} role="tab" type="button" aria-selected={segment === v} onClick={() => setSegment(v)}
+            className={`rounded-full border px-3 py-1 text-sm ${segment === v ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-muted"}`}
+            data-testid={`segment-${v}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 bg-card p-4 rounded-xl border border-border shadow-sm">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name, phone, or tags..."
+            placeholder="Search by name, phone, email or tags..."
             className="pl-9 bg-background"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -109,14 +142,22 @@ export default function CustomersPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Branches</SelectItem>
-            <SelectItem value="Downtown">Downtown</SelectItem>
-            <SelectItem value="Westside">Westside</SelectItem>
-            <SelectItem value="North">North Hills</SelectItem>
+            {branches.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={channelFilter} onValueChange={setChannelFilter}>
+          <SelectTrigger className="w-[160px] bg-background" aria-label="Channel"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All channels</SelectItem>
+            <SelectItem value="whatsapp">WhatsApp</SelectItem>
+            <SelectItem value="messenger">Messenger</SelectItem>
+            <SelectItem value="instagram">Instagram</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-sm text-muted-foreground ml-auto tabular-nums">{customers?.length ?? 0} customers</span>
       </div>
 
-      <div className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
+      <div className="border border-border rounded-xl overflow-x-auto bg-card shadow-sm">
         <Table>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -125,6 +166,7 @@ export default function CustomersPage() {
               <TableHead>Branch</TableHead>
               <TableHead>Address</TableHead>
               <TableHead>Tags</TableHead>
+              <TableHead>Chats</TableHead>
               <TableHead>Joined</TableHead>
               <TableHead className="w-[50px]" />
             </TableRow>
@@ -144,13 +186,14 @@ export default function CustomersPage() {
                   <TableCell><Skeleton className="h-4 w-28" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-10" /></TableCell>
                   <TableCell />
                 </TableRow>
               ))
               : customers?.length === 0
                 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
                       <User className="h-8 w-8 mx-auto mb-2 opacity-20" />
                       No customers found matching your criteria.
                     </TableCell>
@@ -185,8 +228,9 @@ export default function CustomersPage() {
                     <TableCell>
                       <div className="flex items-center text-muted-foreground text-sm">
                         <Phone className="h-3 w-3 mr-2" />
-                        {customer.phone}
+                        {customer.phone || "—"}
                       </div>
+                      {customer.email && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{customer.email}</div>}
                     </TableCell>
                     <TableCell>
                       {customer.branch
@@ -222,6 +266,10 @@ export default function CustomersPage() {
                           </Badge>
                         ))}
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm tabular-nums">
+                      {customer.conversationCount ?? 0}
+                      {customer.lastActivity && <div className="text-[11px] text-muted-foreground">{formatDistanceToNow(parseISO(customer.lastActivity), { addSuffix: true })}</div>}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {format(parseISO(customer.createdAt), "MMM d, yyyy")}
@@ -299,8 +347,8 @@ function CustomerDetailView({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 space-y-6">
-      <div className="flex items-center gap-3">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5">
           <ArrowLeft className="h-4 w-4" />
           Back
@@ -394,6 +442,11 @@ function CustomerDetailView({
           </CardContent>
         )}
       </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <CustomerFieldsCard customer={customer as Parameters<typeof CustomerFieldsCard>[0]["customer"]} />
+        <CustomerTimeline customerId={customerId} />
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Profile card */}

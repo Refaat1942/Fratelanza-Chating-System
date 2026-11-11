@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -40,7 +40,11 @@ export const conversationsTable = pgTable("conversations", {
   takeoverAt: timestamp("takeover_at"),
   // Routed to a team: auto-assignment only picks that team's agents.
   teamId: integer("team_id"),
-});
+}, (t) => [
+  index("conversations_customer_idx").on(t.customerId),
+  index("conversations_agent_idx").on(t.assignedAgentId),
+  index("conversations_last_msg_idx").on(t.lastMessageAt),
+]);
 
 export const insertConversationSchema = createInsertSchema(
   conversationsTable,

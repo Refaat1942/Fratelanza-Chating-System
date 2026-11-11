@@ -57,4 +57,13 @@ if (fs.existsSync(spaDir)) {
   });
 }
 
+// Last resort: a JSON error (never an HTML stack trace) for anything a route
+// didn't handle. Details go to the log only.
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = typeof (err as { status?: number })?.status === "number" ? (err as { status: number }).status : 500;
+  if (status >= 500) req.log?.error({ err }, "Unhandled route error");
+  if (res.headersSent) return;
+  res.status(status).json({ error: status === 413 ? "Request too large" : status >= 500 ? "Something went wrong on the server" : (err as Error)?.message ?? "Bad request" });
+});
+
 export default app;

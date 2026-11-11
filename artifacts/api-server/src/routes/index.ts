@@ -26,6 +26,7 @@ import channelsRouter from "./channels";
 import teamsRouter from "./teams";
 import mediaRouter from "./media";
 import templatesRouter from "./templates";
+import crmRouter from "./crm";
 
 const router: IRouter = Router();
 
@@ -35,6 +36,7 @@ router.use(webhooksRouter);
 router.use(authRouter);
 router.use(userPermissionsRouter);
 router.use(usersRouter);
+router.use(crmRouter);
 router.use(customersRouter);
 router.use(customerAiRouter);
 router.use(conversationsRouter);

@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -36,7 +37,7 @@ export const messagesTable = pgTable(
     templateId: integer("template_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("messages_external_id_uniq").on(t.externalId)],
+  (t) => [uniqueIndex("messages_external_id_uniq").on(t.externalId), index("messages_conversation_idx").on(t.conversationId, t.id)],
 );
 
 export const insertMessageSchema = createInsertSchema(messagesTable).omit({

@@ -15,7 +15,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, parseISO } from "date-fns";
-import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History, Radio, UsersRound, FileText } from "lucide-react";
+import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History, Radio, UsersRound, FileText, ListPlus } from "lucide-react";
 import {
   useRolePermissions, useUpdateRolePermissions, type RolePermissions as RolePerms, type RoleName,
   useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason,
@@ -54,6 +54,7 @@ import { ChannelsSettings } from "@/pages/settings-channels";
 import { TeamsSettings } from "@/pages/settings-teams";
 import { SpeedMessagesSettings } from "@/pages/settings-speed";
 import { TemplatesSettings } from "@/pages/settings-templates";
+import { CustomerFieldsSettings } from "@/components/crm-extras";
 import { Smartphone } from "lucide-react";
 
 type SettingsSection = {
@@ -71,6 +72,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "tags",                    group: "Workflow",      label: "Conversation Tags",   icon: TagIcon,       Component: TagsSettings },
   { value: "replies",                 group: "Workflow",      label: "Speed Messages",      icon: MessageSquare, Component: SpeedMessagesSettings },
   { value: "distribution",            group: "Workflow",      label: "Chat Distribution",   icon: Sliders,       Component: ChatDistributionSettings },
+  { value: "customer-fields",         group: "Workflow",      label: "Customer Fields",     icon: ListPlus,      Component: CustomerFieldsSettings },
   { value: "chat-reason-categories",  group: "Reasons",       label: "Reason Categories",   icon: FolderOpen,    Component: ChatReasonCategoriesSettings },
   { value: "chat-reasons",            group: "Workflow",      label: "Chat Topics",         icon: MessageCircle, Component: TopicsSettings },
   { value: "not-ready",               group: "Reasons",       label: "Not Ready Reasons",   icon: Coffee,        Component: NotReadyReasonsSettings },
