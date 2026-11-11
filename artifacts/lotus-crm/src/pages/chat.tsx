@@ -46,6 +46,7 @@ import {
   Eye,
   ShieldCheck,
   Undo2,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +78,8 @@ import { useLocation, useSearch } from "wouter";
 import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, useTakeover, useReleaseTakeover, useTeams, useSpeedMessages, useSpeedCategories, useBranding, recordSpeedUse, type BulkAction, type SpeedMessage } from "@/lib/api-extra";
 import { fillVariables } from "@/lib/speed";
 import { SpeedDialog } from "@/pages/settings-speed";
+import { AttachmentView } from "@/components/attachment-view";
+import { TemplateDialog } from "@/components/template-dialog";
 import { WhisperPanel } from "@/components/whisper-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
@@ -795,6 +798,7 @@ function ChatCenter({
       .slice(0, 6);
   }, [slash?.[1], speed]); // eslint-disable-line react-hooks/exhaustive-deps
   const [slashIdx, setSlashIdx] = useState(0);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const pickSpeed = (r: SpeedMessage) => {
     recordSpeedUse(r.id);
     setMessage(fillVariables(r.body, {
@@ -1162,16 +1166,12 @@ function ChatCenter({
                       failed && "ring-2 ring-destructive/60",
                     )}
                   >
-                    <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] bidi">{msg.body}</p>
+                    {!(msg.attachments?.length && /^\[(Image|Video|Voice\/Audio message|Sticker|File|Document[^\]]*)\]$/.test(msg.body)) && (
+                      <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] bidi">{msg.body.replace(/^\[(Image|Video)\] (?=\S)/, msg.attachments?.length ? "" : "$&")}</p>
+                    )}
                     {msg.attachments && msg.attachments.length > 0 && (
                       <div className="mt-1.5 flex flex-col gap-1">
-                        {msg.attachments.map((url, i) =>
-                          /^data:image|\.(png|jpe?g|gif|webp)(\?|$)/i.test(url) ? (
-                            <img key={i} src={url} alt="Attachment" className="rounded-lg max-h-56 object-contain" loading="lazy" />
-                          ) : (
-                            <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="text-xs underline break-all">Attachment {i + 1}</a>
-                          ),
-                        )}
+                        {msg.attachments.map((url, i) => <AttachmentView key={i} url={url} index={i} />)}
                       </div>
                     )}
                     <div className={cn("flex items-center justify-end gap-1 mt-0.5 text-[11px]", isMe ? "opacity-80" : "text-muted-foreground")}>
@@ -1240,7 +1240,10 @@ function ChatCenter({
         <div className="bg-card border-t border-border px-2 sm:px-4 pt-2 pb-2 pb-safe">
           {outsideWindow && (
             <p role="status" className="max-w-3xl mx-auto mb-2 rounded-md bg-warning/10 border border-warning/30 px-3 py-1.5 text-xs text-warning">
-              More than 24 hours since the customer's last message — {CHANNEL_NAMES[channel] ?? "the channel"} may reject a normal reply. Use an internal note, or wait for the customer to write.
+              More than 24 hours since the customer's last message — {CHANNEL_NAMES[channel] ?? "the channel"} may reject a normal reply.{" "}
+              {channel === "whatsapp" && !noteOnly ? (
+                <button type="button" className="font-semibold underline" onClick={() => setTemplateOpen(true)} data-testid="btn-window-template">Send an approved template instead</button>
+              ) : "Use an internal note, or wait for the customer to write."}
             </p>
           )}
           {!conv?.assignedAgentId && isAdmin && (
@@ -1310,6 +1313,19 @@ function ChatCenter({
                   {uploadMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                 </Button>
                 <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt" className="hidden" onChange={handleFileSelect} />
+                {channel === "whatsapp" && !noteOnly && (
+                  <Button type="button" variant="ghost" size="sm" className="h-10 px-3 text-xs" onClick={() => setTemplateOpen(true)} disabled={!canSend} data-testid="btn-open-template">
+                    <FileText className="h-3.5 w-3.5 mr-1.5" /> Template
+                  </Button>
+                )}
+                {templateOpen && (
+                  <TemplateDialog
+                    conversationId={conversationId}
+                    customerName={conv?.customer?.name}
+                    onClose={() => setTemplateOpen(false)}
+                    onSent={(m) => { append(m as Message); invalidateLists(); }}
+                  />
+                )}
                 {attachments.length > 0 && (
                   <button type="button" className="text-xs text-muted-foreground flex items-center gap-1" onClick={() => setAttachments([])} aria-label="Remove attachments">
                     {attachments.length} file(s) <X className="h-3 w-3" />

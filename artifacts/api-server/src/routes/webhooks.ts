@@ -11,6 +11,8 @@ import { logger } from "../lib/logger";
 import { tryAutoAssign } from "../lib/assignment";
 import { classifyConversation, routeByTopic } from "../lib/topics";
 import { recordWebhookEvent } from "../lib/webhook-stats";
+import { attachMedia, downloadUrl, downloadWhatsAppMedia } from "../lib/media";
+import { applyTemplateStatus } from "../lib/wa-templates";
 import {
   digitsOnly,
   parseWhatsAppWebhook,
@@ -361,6 +363,15 @@ router.post("/webhooks/whatsapp", async (req, res) => {
     for (const c of e.changes ?? []) if (c.field) fields.add(c.field);
   }
   for (const f of fields) recordWebhookEvent(`field:${f}`);
+  // Template approval / rejection updates (field "message_template_status_update").
+  for (const e of (req.body?.entry ?? []) as { changes?: { field?: string; value?: Record<string, unknown> }[] }[]) {
+    for (const c of e.changes ?? []) {
+      if (c.field === "message_template_status_update" && c.value) {
+        try { await applyTemplateStatus(c.value as Parameters<typeof applyTemplateStatus>[0]); }
+        catch (err) { logger.error({ err }, "Template status update failed"); }
+      }
+    }
+  }
   recordWebhookEvent("customer_message", messages.length);
   recordWebhookEvent("status_update", statuses.length);
   recordWebhookEvent("phone_app_reply", sync.echoes.length);
@@ -391,11 +402,18 @@ router.post("/webhooks/whatsapp", async (req, res) => {
 
   for (const m of messages) {
     try {
-      await ingestInbound(
+      const result = await ingestInbound(
         "whatsapp",
         { from: m.from, name: m.name, body: m.body, externalId: m.externalId },
         io,
       );
+      if (m.media && !result.duplicate && result.messageId) {
+        const media = m.media;
+        // After the 200 below: a slow download must never make Meta retry.
+        setImmediate(() => void attachMedia(result.messageId, () => downloadWhatsAppMedia(media.id), {
+          filename: media.filename, source: "whatsapp", io, conversationId: result.conversationId,
+        }));
+      }
     } catch (err) {
       logger.error({ err, externalId: m.externalId }, "WhatsApp inbound failed");
     }
@@ -543,7 +561,15 @@ async function handleSignedSocial(req: Request, res: import("express").Response)
     try {
       if (m.direction === "out") { await importSocialEcho(m, io); continue; }
       const customer = await findOrCreateSocialCustomer(m.channel, m.customerId);
-      await ingestInbound(m.channel, { body: m.body, externalId: m.externalId, attachments: m.attachments }, io, customer);
+      const result = await ingestInbound(m.channel, { body: m.body, externalId: m.externalId, attachments: m.attachments }, io, customer);
+      // Meta CDN links expire: keep our own copy.
+      if (!result.duplicate && result.messageId) {
+        for (const url of m.attachments) {
+          setImmediate(() => void attachMedia(result.messageId, () => downloadUrl(url), {
+            source: m.channel, replaceUrl: url, io, conversationId: result.conversationId,
+          }));
+        }
+      }
     } catch (err) {
       logger.error({ err, externalId: m.externalId, channel }, "Messenger/Instagram inbound failed");
     }

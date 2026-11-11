@@ -24,6 +24,8 @@ import systemRouter from "./system";
 import supervisionRouter from "./supervision";
 import channelsRouter from "./channels";
 import teamsRouter from "./teams";
+import mediaRouter from "./media";
+import templatesRouter from "./templates";
 
 const router: IRouter = Router();
 
@@ -52,5 +54,7 @@ router.use(meRouter);
 router.use(supervisionRouter);
 router.use(channelsRouter);
 router.use(teamsRouter);
+router.use(mediaRouter);
+router.use(templatesRouter);
 
 export default router;

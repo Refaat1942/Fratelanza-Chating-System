@@ -60,6 +60,8 @@ export interface InboundWhatsAppMessage {
   body: string;
   type: string;
   timestamp?: Date;
+  /** Photo / voice note / video / document / sticker to download (Graph media id). */
+  media?: { id: string; mime?: string; filename?: string };
 }
 
 export interface WhatsAppStatusUpdate {
@@ -79,9 +81,11 @@ interface MetaMessage {
     button_reply?: { title?: string };
     list_reply?: { title?: string };
   };
-  image?: { caption?: string };
-  video?: { caption?: string };
-  document?: { caption?: string; filename?: string };
+  image?: { caption?: string; id?: string; mime_type?: string };
+  video?: { caption?: string; id?: string; mime_type?: string };
+  audio?: { id?: string; mime_type?: string; voice?: boolean };
+  sticker?: { id?: string; mime_type?: string };
+  document?: { caption?: string; filename?: string; id?: string; mime_type?: string };
   location?: { latitude?: number; longitude?: number; name?: string };
   reaction?: { emoji?: string };
   // type "unsupported": content the Cloud API does not pass on (polls,
@@ -102,6 +106,14 @@ const UNSUPPORTED_KINDS: Record<string, string> = {
   ephemeral: "disappearing message",
   album: "album",
 };
+
+function mediaOf(m: MetaMessage): InboundWhatsAppMessage["media"] {
+  const x =
+    m.type === "image" ? m.image : m.type === "video" ? m.video : m.type === "audio" ? m.audio
+    : m.type === "sticker" ? m.sticker : m.type === "document" ? m.document : undefined;
+  if (!x?.id) return undefined;
+  return { id: x.id, mime: x.mime_type, filename: m.type === "document" ? m.document?.filename : undefined };
+}
 
 function describeMessage(m: MetaMessage): string | null {
   switch (m.type) {
@@ -194,6 +206,7 @@ export function parseWhatsAppWebhook(payload: unknown): {
           timestamp: m.timestamp
             ? new Date(Number(m.timestamp) * 1000)
             : undefined,
+          media: mediaOf(m),
         });
       }
       for (const s of value.statuses ?? []) {
@@ -234,7 +247,7 @@ export async function sendWhatsAppText(
   if (!to) throw new WhatsAppSendError("Customer has no valid phone number");
 
   const res = await fetch(
-    `https://graph.facebook.com/${c.apiVersion}/${c.phoneNumberId}/messages`,
+    `${process.env.META_GRAPH_BASE_URL || "https://graph.facebook.com"}/${c.apiVersion}/${c.phoneNumberId}/messages`,
     {
       method: "POST",
       headers: {

@@ -32,6 +32,8 @@ export const messagesTable = pgTable(
     // Provider message id (WhatsApp "wamid.…"). Used to de-duplicate Meta's
     // webhook retries and to match delivery/read status callbacks.
     externalId: text("external_id"),
+    // Sent from an approved WhatsApp template (for template analytics).
+    templateId: integer("template_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("messages_external_id_uniq").on(t.externalId)],

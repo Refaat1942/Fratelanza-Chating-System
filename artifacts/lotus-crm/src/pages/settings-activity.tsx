@@ -43,6 +43,7 @@ const LABELS: Record<string, string> = {
   "whisper.sent": "Sent a whisper",
   "monitor.open": "Opened an agent's chat (monitoring)",
   "settings.updated": "Changed settings",
+  "templates.synced": "Synced WhatsApp templates",
   "team.created": "Created team",
   "team.updated": "Updated team",
   "team.members_changed": "Changed team members",
