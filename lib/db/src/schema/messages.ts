@@ -35,6 +35,8 @@ export const messagesTable = pgTable(
     externalId: text("external_id"),
     // Sent from an approved WhatsApp template (for template analytics).
     templateId: integer("template_id"),
+    // Written by a chat bot (customer-facing, no human sender).
+    isBot: boolean("is_bot").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("messages_external_id_uniq").on(t.externalId), index("messages_conversation_idx").on(t.conversationId, t.id)],

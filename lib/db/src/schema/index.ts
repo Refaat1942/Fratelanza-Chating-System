@@ -19,3 +19,4 @@ export * from "./teams";
 export * from "./media";
 export * from "./whatsapp-templates";
 export * from "./customer-fields";
+export * from "./bots";

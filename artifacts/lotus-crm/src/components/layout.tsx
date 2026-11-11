@@ -9,6 +9,7 @@ import {
   Inbox,
   Megaphone,
   Radar,
+  Bot,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -141,6 +142,9 @@ function Shell({ children }: { children: React.ReactNode }) {
             )}
             {perms?.canViewReports && (
               <NavLink href="/reports" icon={FileBarChart} label="Reports" active={isActive("/reports")} />
+            )}
+            {user?.role === "admin" && (
+              <NavLink href="/bots" icon={Bot} label="Bots" active={isActive("/bots")} />
             )}
             {user?.role === "admin" && (
               <NavLink href="/marketing" icon={Megaphone} label="Marketing" active={isActive("/marketing")} />

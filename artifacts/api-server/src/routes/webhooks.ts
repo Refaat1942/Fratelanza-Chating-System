@@ -13,6 +13,7 @@ import { classifyConversation, routeByTopic } from "../lib/topics";
 import { recordWebhookEvent } from "../lib/webhook-stats";
 import { attachMedia, downloadUrl, downloadWhatsAppMedia } from "../lib/media";
 import { applyTemplateStatus } from "../lib/wa-templates";
+import { runBotOnInbound } from "../lib/bot-runtime";
 import {
   digitsOnly,
   parseWhatsAppWebhook,
@@ -291,7 +292,10 @@ async function ingestInbound(
     logger.error({ err, conversationId: conv.id }, "Topic classification failed");
   }
 
-  if (!conv.assignedAgentId) {
+  // A chat bot may answer first; while it keeps the chat, nobody is assigned.
+  const botKeeps = await runBotOnInbound({ conversationId: conv.id, text: body, isNewConversation, io });
+
+  if (!conv.assignedAgentId && !botKeeps) {
     try {
       await routeByTopic(conv.id);
       await tryAutoAssign(conv.id, io);

@@ -47,6 +47,7 @@ import {
   ShieldCheck,
   Undo2,
   FileText,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1175,6 +1176,7 @@ function ChatCenter({
                       </div>
                     )}
                     <div className={cn("flex items-center justify-end gap-1 mt-0.5 text-[11px]", isMe ? "opacity-80" : "text-muted-foreground")}>
+                      {(msg as { isBot?: boolean }).isBot && <span className="inline-flex items-center gap-0.5 font-semibold" title="Sent by a bot"><Bot className="h-3 w-3" aria-hidden />Bot</span>}
                       <time>{format(parseISO(msg.createdAt), "h:mm a")}</time>
                       {isMe && <StatusTicks status={msg.status} />}
                     </div>
