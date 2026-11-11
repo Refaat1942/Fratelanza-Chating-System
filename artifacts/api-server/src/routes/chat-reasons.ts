@@ -34,6 +34,7 @@ router.get("/chat-reasons", requireAuth, async (_req, res) => {
       categoryId: chatReasonsTable.categoryId,
       isActive: chatReasonsTable.isActive,
       keywords: chatReasonsTable.keywords,
+      teamId: chatReasonsTable.teamId,
       createdAt: chatReasonsTable.createdAt,
       categoryTitleEn: chatReasonCategoriesTable.titleEn,
       categoryTitleAr: chatReasonCategoriesTable.titleAr,
@@ -48,7 +49,7 @@ router.get("/chat-reasons", requireAuth, async (_req, res) => {
 });
 
 router.post("/chat-reasons", requireAuth, requireAdmin, async (req, res) => {
-  const { nameAr, nameEn, color, categoryId, isActive, keywords } = req.body || {};
+  const { nameAr, nameEn, color, categoryId, isActive, keywords, teamId } = req.body || {};
   if (typeof nameAr !== "string" || typeof nameEn !== "string" || !nameAr.trim() || !nameEn.trim()) {
     res.status(400).json({ error: "nameAr and nameEn are required" });
     return;
@@ -60,6 +61,7 @@ router.post("/chat-reasons", requireAuth, requireAdmin, async (req, res) => {
     categoryId: typeof categoryId === "number" ? categoryId : null,
     isActive: typeof isActive === "boolean" ? isActive : true,
     keywords: cleanKeywords(keywords) ?? [],
+    teamId: typeof teamId === "number" ? teamId : null,
   }).returning();
   if (row.keywords.length) refile();
   res.status(201).json(row);
@@ -67,13 +69,14 @@ router.post("/chat-reasons", requireAuth, requireAdmin, async (req, res) => {
 
 router.put("/chat-reasons/:id", requireAuth, requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const { nameAr, nameEn, color, categoryId, isActive, keywords } = req.body || {};
+  const { nameAr, nameEn, color, categoryId, isActive, keywords, teamId } = req.body || {};
   const updates: Record<string, unknown> = {};
   if (typeof nameAr === "string") updates.nameAr = nameAr.trim();
   if (typeof nameEn === "string") updates.nameEn = nameEn.trim();
   if (typeof color === "string") updates.color = color.trim();
   if (categoryId === null || typeof categoryId === "number") updates.categoryId = categoryId;
   if (typeof isActive === "boolean") updates.isActive = isActive;
+  if (teamId === null || typeof teamId === "number") updates.teamId = teamId;
   const kw = cleanKeywords(keywords);
   if (kw !== undefined) updates.keywords = kw;
   const [row] = await db.update(chatReasonsTable)

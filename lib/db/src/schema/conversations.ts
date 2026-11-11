@@ -38,6 +38,8 @@ export const conversationsTable = pgTable("conversations", {
   // (control is returned to them on release). Null = no takeover active.
   takeoverFromAgentId: integer("takeover_from_agent_id"),
   takeoverAt: timestamp("takeover_at"),
+  // Routed to a team: auto-assignment only picks that team's agents.
+  teamId: integer("team_id"),
 });
 
 export const insertConversationSchema = createInsertSchema(

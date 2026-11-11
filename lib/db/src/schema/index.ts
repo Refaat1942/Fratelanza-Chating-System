@@ -15,3 +15,4 @@ export * from "./campaign-recipients";
 export * from "./password-reset-tokens";
 export * from "./whispers";
 export * from "./audit-logs";
+export * from "./teams";

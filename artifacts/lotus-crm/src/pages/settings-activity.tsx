@@ -21,6 +21,7 @@ const FILTERS = [
   { v: "conversation", l: "Assignments & takeovers" },
   { v: "whisper", l: "Whispers" },
   { v: "monitor", l: "Supervisor monitoring" },
+  { v: "team", l: "Teams" },
   { v: "settings", l: "Settings" },
 ];
 
@@ -42,6 +43,11 @@ const LABELS: Record<string, string> = {
   "whisper.sent": "Sent a whisper",
   "monitor.open": "Opened an agent's chat (monitoring)",
   "settings.updated": "Changed settings",
+  "team.created": "Created team",
+  "team.updated": "Updated team",
+  "team.members_changed": "Changed team members",
+  "team.deleted": "Deleted team",
+  "conversation.team_transferred": "Transferred chats to a team",
 };
 
 function describe(r: AuditLogRow): string {

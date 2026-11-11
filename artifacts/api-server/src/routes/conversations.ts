@@ -31,6 +31,7 @@ async function getConversationWithRelations(id: number) {
     queuedAt: conversationsTable.queuedAt,
     takeoverFromAgentId: conversationsTable.takeoverFromAgentId,
     takeoverAt: conversationsTable.takeoverAt,
+    teamId: conversationsTable.teamId,
     customer: {
       id: customersTable.id,
       name: customersTable.name,
@@ -57,7 +58,7 @@ async function getConversationWithRelations(id: number) {
 }
 
 router.get("/conversations", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
-  const { status, agentId, tag, search } = req.query as Record<string, string>;
+  const { status, agentId, tag, search, teamId } = req.query as Record<string, string>;
 
   const baseQuery = db.select({
     id: conversationsTable.id,
@@ -77,6 +78,7 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
     queuedAt: conversationsTable.queuedAt,
     takeoverFromAgentId: conversationsTable.takeoverFromAgentId,
     takeoverAt: conversationsTable.takeoverAt,
+    teamId: conversationsTable.teamId,
     customer: {
       id: customersTable.id,
       name: customersTable.name,
@@ -102,6 +104,7 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
   const conditions = [];
   if (status) conditions.push(eq(conversationsTable.status, status as "open" | "completed" | "pending"));
   if (agentId) conditions.push(eq(conversationsTable.assignedAgentId, Number(agentId)));
+  if (teamId) conditions.push(eq(conversationsTable.teamId, Number(teamId)));
   if (search) conditions.push(ilike(customersTable.name, `%${search}%`));
   if (tag) conditions.push(sql<boolean>`${tag} = ANY(${conversationsTable.tags})`);
   if (!(await seesAllChats(req.user!))) {
@@ -224,17 +227,30 @@ router.post("/conversations/bulk", requireAuth, requirePermission("canSendMessag
       result = await db.execute(sql`UPDATE conversations SET assigned_agent_id = ${value}, queued_at = NULL, status = CASE WHEN status = 'pending' AND assigned_agent_id IS NULL THEN 'open' ELSE status END WHERE id IN (${idList})`);
       break;
     }
+    case "team": {
+      // Transfer to a team (or remove the team with null). The chat goes back
+      // to that team's queue and auto-assignment picks one of its agents.
+      if (!isAdmin) { res.status(403).json({ error: "Only admins and supervisors can transfer chats to a team" }); return; }
+      if (value !== null && !(Number.isInteger(value) && value > 0)) { res.status(400).json({ error: "value must be a team id or null" }); return; }
+      result = value === null
+        ? await db.execute(sql`UPDATE conversations SET team_id = NULL WHERE id IN (${idList})`)
+        : await db.execute(sql`UPDATE conversations SET team_id = ${value}, assigned_agent_id = NULL, takeover_from_agent_id = NULL, takeover_at = NULL, status = CASE WHEN status = 'completed' THEN status ELSE 'pending' END, queued_at = COALESCE(queued_at, NOW()) WHERE id IN (${idList})`);
+      break;
+    }
     default:
       res.status(400).json({ error: "Unknown action" });
       return;
   }
   const updated = Number((result as { rowCount?: number | null }).rowCount ?? 0);
+  if (action === "team" && updated > 0) {
+    void logAudit({ actorId: user.id, action: "conversation.team_transferred", entityType: "conversation", details: { ids, teamId: value, updated } });
+  }
   if ((action === "assign" || action === "assignMe") && updated > 0) {
     void logAudit({ actorId: user.id, action: "conversation.bulk_assigned", entityType: "conversation", details: { ids, to: action === "assignMe" ? user.id : value, updated } });
   }
   const io = req.app.get("io") as IOServer | undefined;
   io?.emit("conversation_updated", { conversationId: 0 });
-  if (action === "status" && value === "completed") void drainQueue(io);
+  if ((action === "status" && value === "completed") || (action === "team" && value !== null)) void drainQueue(io);
   res.json({ updated, skipped: ids.length - updated });
 });
 

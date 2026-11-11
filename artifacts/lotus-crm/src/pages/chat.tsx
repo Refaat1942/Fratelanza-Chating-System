@@ -75,7 +75,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { FaWhatsapp, FaFacebookMessenger, FaInstagram, FaSms } from "react-icons/fa";
 import { useLocation, useSearch } from "wouter";
-import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, useTakeover, useReleaseTakeover, type BulkAction } from "@/lib/api-extra";
+import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, useTakeover, useReleaseTakeover, useTeams, type BulkAction } from "@/lib/api-extra";
 import { WhisperPanel } from "@/components/whisper-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
@@ -617,6 +617,7 @@ function BulkBar({
 }) {
   const bulk = useBulkConversations();
   const { data: workload } = useWorkload(isAdmin);
+  const { data: teams } = useTeams();
   const [listName, setListName] = useState("");
   const [listOpen, setListOpen] = useState(false);
   const n = ids.length;
@@ -707,6 +708,12 @@ function BulkBar({
               })}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => run({ action: "assign", value: null }, "Returned to the queue")}>Back to queue (unassigned)</DropdownMenuItem>
+              {(teams ?? []).length > 0 && <DropdownMenuSeparator />}
+              {(teams ?? []).map((t) => (
+                <DropdownMenuItem key={`t${t.id}`} onClick={() => run({ action: "team", value: t.id }, `Transferred to ${t.name}`)} data-testid={`bulk-team-${t.id}`}>
+                  Transfer to team: {t.name}
+                </DropdownMenuItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (

@@ -23,6 +23,7 @@ import userPermissionsRouter from "./user-permissions";
 import systemRouter from "./system";
 import supervisionRouter from "./supervision";
 import channelsRouter from "./channels";
+import teamsRouter from "./teams";
 
 const router: IRouter = Router();
 
@@ -50,5 +51,6 @@ router.use(notReadyReasonsRouter);
 router.use(meRouter);
 router.use(supervisionRouter);
 router.use(channelsRouter);
+router.use(teamsRouter);
 
 export default router;

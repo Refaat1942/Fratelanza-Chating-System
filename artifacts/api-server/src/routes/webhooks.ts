@@ -9,7 +9,7 @@ import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { tryAutoAssign } from "../lib/assignment";
-import { classifyConversation } from "../lib/topics";
+import { classifyConversation, routeByTopic } from "../lib/topics";
 import { recordWebhookEvent } from "../lib/webhook-stats";
 import {
   digitsOnly,
@@ -291,6 +291,7 @@ async function ingestInbound(
 
   if (!conv.assignedAgentId) {
     try {
+      await routeByTopic(conv.id);
       await tryAutoAssign(conv.id, io);
     } catch (err) {
       logger.error({ err, conversationId: conv.id }, "Auto-assign failed");

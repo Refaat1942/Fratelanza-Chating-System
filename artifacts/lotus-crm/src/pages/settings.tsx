@@ -16,7 +16,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, parseISO } from "date-fns";
-import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History, Radio } from "lucide-react";
+import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History, Radio, UsersRound } from "lucide-react";
 import {
   useRolePermissions, useUpdateRolePermissions, type RolePermissions as RolePerms, type RoleName,
   useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason,
@@ -52,6 +52,7 @@ import { TopicsSettings } from "@/pages/settings-topics";
 import { WhatsAppSettings } from "@/pages/settings-whatsapp";
 import { ActivityLogSettings } from "@/pages/settings-activity";
 import { ChannelsSettings } from "@/pages/settings-channels";
+import { TeamsSettings } from "@/pages/settings-teams";
 import { Smartphone } from "lucide-react";
 
 type SettingsSection = {
@@ -64,6 +65,7 @@ type SettingsSection = {
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "users",                   group: "Team",          label: "Users & Roles",       icon: Users,         Component: UsersSettings },
+  { value: "teams",                   group: "Team",          label: "Teams",               icon: UsersRound,    Component: TeamsSettings },
   { value: "permissions",             group: "Team",          label: "Permissions",         icon: Lock,          Component: PermissionsSettings },
   { value: "tags",                    group: "Workflow",      label: "Conversation Tags",   icon: TagIcon,       Component: TagsSettings },
   { value: "replies",                 group: "Workflow",      label: "Quick Replies",       icon: MessageSquare, Component: QuickRepliesSettings },

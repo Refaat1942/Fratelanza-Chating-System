@@ -71,6 +71,7 @@ interface AgentRow {
   load: number;
   lastAssignedAt: Date | null;
   maxChats: number | null;
+  teamId: number | null;
 }
 
 /**
@@ -92,6 +93,7 @@ async function listAvailableAgents(
                 AND ${conversationsTable.assignedAgentId} = ${usersTable.id}), 0)::int`,
       lastAssignedAt: usersTable.lastAssignedAt,
       maxChats: usersTable.maxChats,
+      teamId: usersTable.teamId,
     })
     .from(usersTable)
     .leftJoin(
@@ -99,7 +101,7 @@ async function listAvailableAgents(
       eq(conversationsTable.assignedAgentId, usersTable.id),
     )
     .where(and(eq(usersTable.role, "agent"), eq(usersTable.status, "available"), eq(usersTable.isActive, true)))
-    .groupBy(usersTable.id, usersTable.lastAssignedAt, usersTable.maxChats);
+    .groupBy(usersTable.id, usersTable.lastAssignedAt, usersTable.maxChats, usersTable.teamId);
 
   return excludeAgentId === undefined
     ? rows
@@ -146,13 +148,13 @@ export async function tryAutoAssign(
   const result = await db.transaction(async (tx) => {
     // 1) Lock the conversation row.
     const lockedRows = await tx.execute(sql`
-      SELECT id, assigned_agent_id, status, queued_at
+      SELECT id, assigned_agent_id, status, queued_at, team_id
       FROM ${conversationsTable}
       WHERE id = ${conversationId}
       FOR UPDATE
     `);
     const conv = (lockedRows.rows ?? lockedRows)[0] as
-      | { id: number; assigned_agent_id: number | null; status: string; queued_at: Date | null }
+      | { id: number; assigned_agent_id: number | null; status: string; queued_at: Date | null; team_id: number | null }
       | undefined;
     if (!conv) return { agentId: null as number | null, queued: false };
     if (conv.assigned_agent_id) return { agentId: conv.assigned_agent_id, queued: false };
@@ -161,7 +163,9 @@ export async function tryAutoAssign(
     // 2) Pick a candidate from currently-available agents.
     // Each agent's own limit (Users & Roles) wins over the global default.
     const capOf = (a: { maxChats: number | null }) => a.maxChats ?? settings.maxChatsPerAgent;
-    const pool = await listAvailableAgents(tx as unknown as typeof db);
+    // A chat routed to a team only goes to that team's agents.
+    const all = await listAvailableAgents(tx as unknown as typeof db);
+    const pool = conv.team_id ? all.filter((a) => a.teamId === conv.team_id) : all;
     const candidates = pool.filter((a) => a.load < capOf(a));
     const agentId = chooseAgent(candidates, settings.assignmentStrategy);
 

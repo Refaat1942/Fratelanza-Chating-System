@@ -24,7 +24,7 @@ import { useAuth } from "@/lib/auth";
 import { EmptyState, ErrorState } from "@/components/states";
 import { initials, roleLabel, userLabel, type AppUser } from "@/lib/types";
 import { PasswordField } from "@/components/password-field";
-import { useWorkload, type RoleName } from "@/lib/api-extra";
+import { useTeams, useWorkload, type RoleName } from "@/lib/api-extra";
 import { formatDistanceToNow, parseISO } from "date-fns";
 
 const json = { "Content-Type": "application/json" };
@@ -47,6 +47,8 @@ function useUsers() {
 type Confirm = { kind: "deactivate" | "delete"; user: AppUser } | null;
 
 export function UsersSettings() {
+  const { data: teamsList } = useTeams();
+  const teamName = (id: number) => teamsList?.find((t) => t.id === id)?.name;
   const { user: me } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -163,6 +165,7 @@ export function UsersSettings() {
                   </div>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <Badge variant="secondary" className="text-[11px] h-5 font-medium">{roleLabel(u.role)}</Badge>
+                    {u.teamId && teamName(u.teamId) && <Badge variant="outline" className="text-[11px] h-5">{teamName(u.teamId)}</Badge>}
                     <Badge
                       variant="outline"
                       className={`text-[11px] h-5 font-medium ${active ? "border-success/40 text-success bg-success/10" : "border-border text-muted-foreground"}`}
@@ -269,6 +272,8 @@ function UserFormDialog({
   const [role, setRole] = useState<RoleName>((user?.role as RoleName) ?? "agent");
   const [password, setPassword] = useState(isNew ? tempPassword() : "");
   const [maxChats, setMaxChats] = useState<string>(user?.maxChats ? String(user.maxChats) : "");
+  const [teamId, setTeamId] = useState<string>(user?.teamId ? String(user.teamId) : "none");
+  const { data: teams } = useTeams();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -287,13 +292,13 @@ function UserFormDialog({
       if (isNew) {
         await customFetch("/api/users", {
           method: "POST", headers: json,
-          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), role, password, maxChats: cap }),
+          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), role, password, maxChats: cap, teamId: teamId === "none" ? null : Number(teamId) }),
         });
         toast({ title: "User created", description: "They will choose their own password at first sign-in." });
       } else {
         await customFetch(`/api/users/${user!.id}`, {
           method: "PUT", headers: json,
-          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), maxChats: cap, ...(isSelf ? {} : { role }) }),
+          body: JSON.stringify({ name: name.trim(), displayName: displayName.trim(), email: email.trim(), maxChats: cap, teamId: teamId === "none" ? null : Number(teamId), ...(isSelf ? {} : { role }) }),
         });
         toast({ title: "User updated" });
       }
@@ -336,6 +341,16 @@ function UserFormDialog({
               </SelectContent>
             </Select>
             {isSelf && <p className="text-xs text-muted-foreground">You cannot change your own role.</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="u-team">Team</Label>
+            <Select value={teamId} onValueChange={setTeamId}>
+              <SelectTrigger id="u-team" className="h-11" data-testid="select-user-team"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No team</SelectItem>
+                {(teams ?? []).map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="u-max">Max open chats <span className="text-muted-foreground font-normal">(queue limit)</span></Label>

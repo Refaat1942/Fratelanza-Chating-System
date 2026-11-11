@@ -13,6 +13,8 @@ export const chatReasonsTable = pgTable("chat_reasons", {
   // Words/phrases (English or Arabic) that put a conversation in this topic
   // automatically. Empty = manual-only topic.
   keywords: text("keywords").array().notNull().default([]),
+  // Chats filed under this topic are routed to this team (if set).
+  teamId: integer("team_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

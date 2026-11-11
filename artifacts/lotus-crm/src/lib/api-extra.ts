@@ -448,6 +448,8 @@ export interface ChatReason {
   categoryTitleEn?: string | null;
   categoryTitleAr?: string | null;
   keywords?: string[];
+  /** Chats filed under this topic are routed to this team. */
+  teamId?: number | null;
 }
 
 export function useChatReasons() {
@@ -460,7 +462,7 @@ export function useChatReasons() {
 export function useCreateChatReason() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { nameEn: string; nameAr: string; color: string; categoryId: number | null; keywords?: string[] }) =>
+    mutationFn: (data: { nameEn: string; nameAr: string; color: string; categoryId: number | null; keywords?: string[]; teamId?: number | null }) =>
       customFetch<ChatReason>("/api/chat-reasons", { method: "POST", body: JSON.stringify(data) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/chat-reasons"] }),
   });
@@ -469,7 +471,7 @@ export function useCreateChatReason() {
 export function useUpdateChatReason() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; nameEn?: string; nameAr?: string; color?: string; categoryId?: number | null; keywords?: string[]; isActive?: boolean }) =>
+    mutationFn: ({ id, ...data }: { id: number; nameEn?: string; nameAr?: string; color?: string; categoryId?: number | null; keywords?: string[]; isActive?: boolean; teamId?: number | null }) =>
       customFetch<ChatReason>(`/api/chat-reasons/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/chat-reasons"] }),
   });
@@ -605,7 +607,8 @@ export type BulkAction =
   | { action: "addTag" | "removeTag"; value: string }
   | { action: "status"; value: "open" | "pending" | "completed" }
   | { action: "read" | "assignMe"; value?: undefined }
-  | { action: "assign"; value: number | null };
+  | { action: "assign"; value: number | null }
+  | { action: "team"; value: number | null };
 
 export function useBulkConversations() {
   const qc = useQueryClient();
@@ -722,6 +725,8 @@ export interface MonitoringRow {
   agent_status: string | null;
   takeover_from_agent_id: number | null;
   takeover_from_name: string | null;
+  team_id: number | null;
+  team_name: string | null;
   takeover_at: string | null;
   customer_id: number;
   customer_name: string;
@@ -749,12 +754,13 @@ export interface MonitoringResponse {
   conversations: MonitoringRow[];
 }
 
-export function useMonitoring(view: MonitoringView, filters: { agentId?: number; channel?: string }) {
+export function useMonitoring(view: MonitoringView, filters: { agentId?: number; channel?: string; teamId?: number }) {
   const qs = new URLSearchParams({ view });
+  if (filters.teamId) qs.set("teamId", String(filters.teamId));
   if (filters.agentId) qs.set("agentId", String(filters.agentId));
   if (filters.channel) qs.set("channel", filters.channel);
   return useQuery({
-    queryKey: ["/api/monitoring", view, filters.agentId ?? 0, filters.channel ?? ""],
+    queryKey: ["/api/monitoring", view, filters.agentId ?? 0, filters.channel ?? "", filters.teamId ?? 0],
     queryFn: () => customFetch<MonitoringResponse>(`/api/monitoring?${qs}`),
     refetchInterval: 10_000,
   });
@@ -778,5 +784,56 @@ export function useAuditLogs(filters: { action?: string; before?: number | null 
   return useQuery({
     queryKey: ["/api/audit-logs", filters.action ?? "", filters.before ?? 0],
     queryFn: () => customFetch<{ rows: AuditLogRow[]; nextBefore: number | null }>(`/api/audit-logs?${qs}`),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Teams
+// ---------------------------------------------------------------------------
+export interface TeamMember { id: number; name: string; role: string; status: string }
+export interface Team {
+  id: number;
+  name: string;
+  description: string | null;
+  color: string | null;
+  leaderId: number | null;
+  leaderName: string | null;
+  isActive: boolean;
+  memberCount: number;
+  members: TeamMember[];
+  openChats: number;
+  queued: number;
+}
+
+export function useTeams() {
+  return useQuery({ queryKey: ["/api/teams"], queryFn: () => customFetch<Team[]>("/api/teams"), staleTime: 30_000 });
+}
+
+export function useSaveTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id?: number; data: Partial<Pick<Team, "name" | "description" | "color" | "leaderId" | "isActive">> }) =>
+      customFetch<Team>(id ? `/api/teams/${id}` : "/api/teams", { method: id ? "PUT" : "POST", body: JSON.stringify(data) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/teams"] }),
+  });
+}
+
+export function useSetTeamMembers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, userIds }: { id: number; userIds: number[] }) =>
+      customFetch(`/api/teams/${id}/members`, { method: "PUT", body: JSON.stringify({ userIds }) }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["/api/teams"] });
+      void qc.invalidateQueries({ queryKey: ["/api/users"] });
+    },
+  });
+}
+
+export function useDeleteTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => customFetch(`/api/teams/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/teams"] }),
   });
 }

@@ -14,10 +14,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { EmptyState } from "@/components/states";
 import {
-  useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason, useReclassifyTopics, type ChatReason,
+  useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason, useReclassifyTopics, useTeams, type ChatReason,
 } from "@/lib/api-extra";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type Draft = { id?: number; nameEn: string; nameAr: string; color: string; keywords: string; isActive: boolean };
+type Draft = { id?: number; nameEn: string; nameAr: string; color: string; keywords: string; isActive: boolean; teamId: string };
 
 const toList = (s: string) => s.split(/[,،\n]/).map((k) => k.trim()).filter(Boolean);
 
@@ -28,6 +29,7 @@ const toList = (s: string) => s.split(/[,،\n]/).map((k) => k.trim()).filter(Boo
  */
 export function TopicsSettings() {
   const { data: topics, isLoading } = useChatReasons();
+  const { data: teams } = useTeams();
   const create = useCreateChatReason();
   const update = useUpdateChatReason();
   const remove = useDeleteChatReason();
@@ -42,7 +44,7 @@ export function TopicsSettings() {
       toast({ title: "Enter the English and Arabic names", variant: "destructive" });
       return;
     }
-    const body = { nameEn: draft.nameEn.trim(), nameAr: draft.nameAr.trim(), color: draft.color, keywords: toList(draft.keywords) };
+    const body = { nameEn: draft.nameEn.trim(), nameAr: draft.nameAr.trim(), color: draft.color, keywords: toList(draft.keywords), teamId: draft.teamId === "none" ? null : Number(draft.teamId) };
     const done = { onSuccess: () => { toast({ title: draft.id ? "Topic updated — chats are being re-sorted" : "Topic added" }); setDraft(null); }, onError: () => toast({ title: "Could not save the topic", variant: "destructive" }) };
     if (draft.id) update.mutate({ id: draft.id, ...body, isActive: draft.isActive }, done);
     else create.mutate({ ...body, categoryId: null }, done);
@@ -66,7 +68,7 @@ export function TopicsSettings() {
           >
             {refile.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />} Re-sort all chats
           </Button>
-          <Button className="h-10" onClick={() => setDraft({ nameEn: "", nameAr: "", color: "#0E7490", keywords: "", isActive: true })} data-testid="btn-add-topic">
+          <Button className="h-10" onClick={() => setDraft({ nameEn: "", nameAr: "", color: "#0E7490", keywords: "", isActive: true, teamId: "none" })} data-testid="btn-add-topic">
             <Plus className="h-4 w-4 mr-2" /> Add topic
           </Button>
         </div>
@@ -93,9 +95,12 @@ export function TopicsSettings() {
                   {(t.keywords?.length ?? 0) > 14 && <span className="text-[11px] text-muted-foreground">+{(t.keywords?.length ?? 0) - 14} more</span>}
                   {!(t.keywords?.length) && <span className="text-[11px] text-muted-foreground">No keywords — manual only</span>}
                 </div>
+                {t.teamId && teams?.find((x) => x.id === t.teamId) && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">Routes new chats to team <b>{teams.find((x) => x.id === t.teamId)!.name}</b></p>
+                )}
               </div>
               <Button variant="ghost" size="icon" className="h-10 w-10" aria-label={`Edit ${t.nameEn}`}
-                onClick={() => setDraft({ id: t.id, nameEn: t.nameEn, nameAr: t.nameAr, color: t.color, keywords: (t.keywords ?? []).join(", "), isActive: t.isActive })}>
+                onClick={() => setDraft({ id: t.id, nameEn: t.nameEn, nameAr: t.nameAr, color: t.color, keywords: (t.keywords ?? []).join(", "), isActive: t.isActive, teamId: t.teamId ? String(t.teamId) : "none" })}>
                 <Pencil className="h-4 w-4" />
               </Button>
               <Button variant="ghost" size="icon" className="h-10 w-10 text-destructive hover:text-destructive" aria-label={`Delete ${t.nameEn}`} onClick={() => setToDelete(t)}>
@@ -122,6 +127,17 @@ export function TopicsSettings() {
                 <Label htmlFor="t-kw">Keywords</Label>
                 <Textarea id="t-kw" rows={5} value={draft.keywords} onChange={(e) => setDraft({ ...draft, keywords: e.target.value })} placeholder="price, quotation, how much, سعر, عرض سعر, بكام" className="text-sm bidi" data-testid="topic-keywords" />
                 <p className="text-xs text-muted-foreground">Separate with commas or new lines. English words match whole words; Arabic words also match with prefixes like ال / و / ب, and with or without hamza/tashkeel.</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Route new chats to team</Label>
+                <Select value={draft.teamId} onValueChange={(v) => setDraft({ ...draft, teamId: v })}>
+                  <SelectTrigger className="h-11" data-testid="topic-team"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No team (everyone)</SelectItem>
+                    {(teams ?? []).map((x) => <SelectItem key={x.id} value={String(x.id)}>{x.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">An unassigned chat filed under this topic waits for, and is assigned to, that team's agents only.</p>
               </div>
               <div className="flex items-center gap-4">
                 <div className="space-y-1.5"><Label htmlFor="t-color">Colour</Label><input id="t-color" type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} className="h-11 w-16 rounded-md border border-input bg-background p-1" /></div>
