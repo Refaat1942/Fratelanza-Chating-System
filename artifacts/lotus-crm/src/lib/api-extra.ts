@@ -193,7 +193,7 @@ export function useCampaignRecipients(campaignId: number | null) {
 // ---------------------------------------------------------------------------
 // Role permissions (5 fixed booleans per role)
 // ---------------------------------------------------------------------------
-export type RoleName = "admin" | "agent";
+export type RoleName = "admin" | "supervisor" | "agent";
 
 export interface RolePermissions {
   role: RoleName;
@@ -202,7 +202,10 @@ export interface RolePermissions {
   canViewReports: boolean;
   canManageCustomers: boolean;
   canManageSettings: boolean;
-  updatedAt: string;
+  canMonitorChats: boolean;
+  canWhisper: boolean;
+  canTakeover: boolean;
+  updatedAt: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +217,12 @@ export interface EffectivePermissions {
   canViewReports: boolean;
   canManageCustomers: boolean;
   canManageSettings: boolean;
+  /** Supervisors/admins: open other people's live chats. */
+  canMonitorChats: boolean;
+  /** Supervisors/admins: private messages to the agent (Whisper Mode). */
+  canWhisper: boolean;
+  /** Supervisors/admins: take a chat over and hand it back. */
+  canTakeover: boolean;
 }
 
 export function useMyPermissions() {
@@ -365,6 +374,9 @@ export function usePermissionsFor(role: RoleName | undefined) {
     canViewReports: row?.canViewReports ?? (role === "admin"),
     canManageCustomers: row?.canManageCustomers ?? true,
     canManageSettings: row?.canManageSettings ?? (role === "admin"),
+    canMonitorChats: row?.canMonitorChats ?? (role !== "agent"),
+    canWhisper: row?.canWhisper ?? (role !== "agent"),
+    canTakeover: row?.canTakeover ?? (role !== "agent"),
   };
 }
 
@@ -621,5 +633,150 @@ export function useReclassifyTopics() {
       void qc.invalidateQueries({ queryKey: ["/api/conversations"] });
       void qc.invalidateQueries({ queryKey: ["/api/insights"] });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Supervision: Whisper Mode, takeover, live monitoring, activity log
+// ---------------------------------------------------------------------------
+export interface Whisper {
+  id: number;
+  conversationId: number;
+  agentId: number;
+  senderId: number;
+  senderName: string | null;
+  senderRole: string | null;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export const whispersKey = (conversationId: number) => ["/api/conversations", conversationId, "whispers"] as const;
+
+export function useWhispers(conversationId: number | null) {
+  return useQuery({
+    queryKey: whispersKey(conversationId ?? 0),
+    queryFn: () => customFetch<Whisper[]>(`/api/conversations/${conversationId}/whispers`),
+    enabled: conversationId != null,
+    staleTime: 5_000,
+  });
+}
+
+export function useSendWhisper(conversationId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: string) =>
+      customFetch<Whisper>(`/api/conversations/${conversationId}/whispers`, { method: "POST", body: JSON.stringify({ body }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: whispersKey(conversationId ?? 0) }),
+  });
+}
+
+export function useMarkWhispersRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: number) =>
+      customFetch(`/api/conversations/${conversationId}/whispers/read`, { method: "POST", body: "{}" }),
+    onSuccess: (_d, conversationId) => {
+      void qc.invalidateQueries({ queryKey: ["/api/whispers/unread"] });
+      void qc.invalidateQueries({ queryKey: whispersKey(conversationId) });
+    },
+  });
+}
+
+export function useWhisperUnread() {
+  return useQuery({
+    queryKey: ["/api/whispers/unread"],
+    queryFn: () => customFetch<{ total: number; byConversation: Record<string, number> }>("/api/whispers/unread"),
+    refetchInterval: 30_000,
+  });
+}
+
+function useConversationAction(path: "takeover" | "release") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: number) =>
+      customFetch<{ ok: boolean }>(`/api/conversations/${conversationId}/${path}`, { method: "POST", body: "{}" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/conversations"] });
+      qc.invalidateQueries({ queryKey: ["/api/monitoring"] });
+    },
+  });
+}
+export const useTakeover = () => useConversationAction("takeover");
+export const useReleaseTakeover = () => useConversationAction("release");
+
+export type MonitoringView = "active" | "hanging" | "last_client" | "unassigned" | "long_waiting" | "sla";
+
+export interface MonitoringRow {
+  id: number;
+  status: string;
+  channel: string;
+  created_at: string;
+  last_message_at: string | null;
+  last_sender_type: string | null;
+  last_message: string | null;
+  unread_count: number;
+  queued_at: string | null;
+  assigned_agent_id: number | null;
+  agent_name: string | null;
+  agent_status: string | null;
+  takeover_from_agent_id: number | null;
+  takeover_from_name: string | null;
+  takeover_at: string | null;
+  customer_id: number;
+  customer_name: string;
+  customer_phone: string;
+  waiting_minutes: number | null;
+  age_minutes: number;
+  sla_breached: boolean;
+}
+
+export interface MonitoringAgent {
+  id: number;
+  name: string;
+  role: string;
+  status: string;
+  last_login_at: string | null;
+  open_chats: number;
+  awaiting_reply: number;
+}
+
+export interface MonitoringResponse {
+  view: MonitoringView;
+  thresholds: { slaMinutes: number; hangingHours: number };
+  counts: Partial<Record<MonitoringView, number>>;
+  agents: MonitoringAgent[];
+  conversations: MonitoringRow[];
+}
+
+export function useMonitoring(view: MonitoringView, filters: { agentId?: number; channel?: string }) {
+  const qs = new URLSearchParams({ view });
+  if (filters.agentId) qs.set("agentId", String(filters.agentId));
+  if (filters.channel) qs.set("channel", filters.channel);
+  return useQuery({
+    queryKey: ["/api/monitoring", view, filters.agentId ?? 0, filters.channel ?? ""],
+    queryFn: () => customFetch<MonitoringResponse>(`/api/monitoring?${qs}`),
+    refetchInterval: 10_000,
+  });
+}
+
+export interface AuditLogRow {
+  id: number;
+  actorId: number | null;
+  actorName: string | null;
+  action: string;
+  entityType: string | null;
+  entityId: number | null;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export function useAuditLogs(filters: { action?: string; before?: number | null }) {
+  const qs = new URLSearchParams({ limit: "100" });
+  if (filters.action) qs.set("action", filters.action);
+  if (filters.before) qs.set("before", String(filters.before));
+  return useQuery({
+    queryKey: ["/api/audit-logs", filters.action ?? "", filters.before ?? 0],
+    queryFn: () => customFetch<{ rows: AuditLogRow[]; nextBefore: number | null }>(`/api/audit-logs?${qs}`),
   });
 }

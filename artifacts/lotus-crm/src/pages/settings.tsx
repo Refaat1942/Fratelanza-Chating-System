@@ -16,7 +16,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, parseISO } from "date-fns";
-import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee } from "lucide-react";
+import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History } from "lucide-react";
 import {
   useRolePermissions, useUpdateRolePermissions, type RolePermissions as RolePerms, type RoleName,
   useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason,
@@ -50,6 +50,7 @@ import { UsersSettings } from "@/pages/settings-users";
 import { BrandingSettings } from "@/pages/settings-branding";
 import { TopicsSettings } from "@/pages/settings-topics";
 import { WhatsAppSettings } from "@/pages/settings-whatsapp";
+import { ActivityLogSettings } from "@/pages/settings-activity";
 import { Smartphone } from "lucide-react";
 
 type SettingsSection = {
@@ -71,9 +72,10 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "not-ready",               group: "Reasons",       label: "Not Ready Reasons",   icon: Coffee,        Component: NotReadyReasonsSettings },
   { value: "whatsapp",                group: "Workflow",      label: "WhatsApp",            icon: Smartphone,    Component: WhatsAppSettings },
   { value: "branding",                group: "Appearance",    label: "Branding",            icon: Palette,       Component: BrandingSettings },
+  { value: "activity",                group: "Security",      label: "Activity Log",        icon: History,       Component: ActivityLogSettings },
 ];
 
-const SETTINGS_GROUPS = ["Team", "Workflow", "Reasons", "Appearance"] as const;
+const SETTINGS_GROUPS = ["Team", "Workflow", "Reasons", "Appearance", "Security"] as const;
 
 export default function SettingsPage() {
   const [active, setActive] = React.useState<string>("users");
@@ -163,7 +165,11 @@ const PERMISSION_FIELDS: { key: keyof Omit<RolePerms, "role" | "updatedAt">; lab
   { key: "canViewReports", label: "View reports", description: "Access analytics and reporting screens." },
   { key: "canManageCustomers", label: "Manage customers", description: "Create, edit, and delete customer records." },
   { key: "canManageSettings", label: "Manage settings", description: "Change system settings (admin always retains this)." },
+  { key: "canMonitorChats", label: "Monitor live chats", description: "Open any agent's chat and use the Live Monitor (supervisors/admins only)." },
+  { key: "canWhisper", label: "Whisper to agents", description: "Send private instructions the customer never sees (supervisors/admins only)." },
+  { key: "canTakeover", label: "Take over chats", description: "Temporarily reply to the customer and hand the chat back (supervisors/admins only)." },
 ];
+const LEAD_ONLY_FIELDS = new Set(["canMonitorChats", "canWhisper", "canTakeover"]);
 
 function PermissionsSettings() {
   const { data, isLoading } = useRolePermissions();
@@ -196,13 +202,10 @@ function PermissionsSettings() {
     return <Skeleton className="h-64 w-full" />;
   }
 
-  const adminPerms = data?.find((r) => r.role === "admin");
-  const agentPerms = data?.find((r) => r.role === "agent");
-
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {(["admin", "agent"] as const).map((role) => {
-        const row = role === "admin" ? adminPerms : agentPerms;
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      {(["admin", "supervisor", "agent"] as const).map((role) => {
+        const row = data?.find((r) => r.role === role);
         return (
           <Card key={role}>
             <CardHeader className="pb-4">
@@ -212,14 +215,18 @@ function PermissionsSettings() {
               </CardTitle>
               <CardDescription>
                 {role === "admin"
-                  ? "Full-control role. Settings access is locked on."
-                  : "What agents can do across the workspace."}
+                  ? "Full-control role. Settings and supervision are locked on."
+                  : role === "supervisor"
+                    ? "Team leaders: monitor chats, whisper to agents, take over."
+                    : "What agents can do across the workspace."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {PERMISSION_FIELDS.map((field) => {
-                const enabled = row ? row[field.key] : (role === "admin");
-                const isAdminLocked = role === "admin" && field.key === "canManageSettings";
+                const leadOnly = LEAD_ONLY_FIELDS.has(field.key);
+                const enabled = role === "agent" && leadOnly ? false : row ? row[field.key] : (role === "admin");
+                const isAdminLocked =
+                  (role === "admin" && (field.key === "canManageSettings" || leadOnly)) || (role === "agent" && leadOnly);
                 return (
                   <div
                     key={field.key}
@@ -439,6 +446,7 @@ function ChatDistributionSettings() {
   const [maxChats, setMaxChats] = React.useState<number>(5);
   const [autoAssign, setAutoAssign] = React.useState<boolean>(true);
   const [strategy, setStrategy] = React.useState<"round_robin" | "least_busy">("least_busy");
+  const [hangingHours, setHangingHours] = React.useState<number>(24);
   const [dirty, setDirty] = React.useState(false);
 
   React.useEffect(() => {
@@ -446,13 +454,14 @@ function ChatDistributionSettings() {
       setMaxChats(settings.maxChatsPerAgent);
       setAutoAssign(settings.autoAssign);
       setStrategy(settings.assignmentStrategy as "round_robin" | "least_busy");
+      setHangingHours((settings as { hangingHours?: number }).hangingHours ?? 24);
       setDirty(false);
     }
   }, [settings]);
 
   const save = () => {
     updateMut.mutate(
-      { data: { maxChatsPerAgent: maxChats, autoAssign, assignmentStrategy: strategy } },
+      { data: { maxChatsPerAgent: maxChats, autoAssign, assignmentStrategy: strategy, hangingHours } as Parameters<typeof updateMut.mutate>[0]["data"] },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
@@ -529,6 +538,25 @@ function ChatDistributionSettings() {
                     <SelectItem value="round_robin">Round-robin (longest idle agent first)</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Monitoring threshold */}
+              <div className="space-y-2">
+                <Label htmlFor="hanging-hours" className="text-sm font-medium">“Hanging” after (hours without activity)</Label>
+                <Input
+                  id="hanging-hours"
+                  type="number"
+                  min={1}
+                  max={720}
+                  className="h-10 w-32"
+                  value={hangingHours}
+                  onChange={(e) => { setHangingHours(Math.max(1, Math.min(720, Number(e.target.value) || 1))); setDirty(true); }}
+                  data-testid="input-hanging-hours"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Live Monitor lists a chat as hanging when it is not completed and nothing has happened for this long.
+                  The reply-time SLA is set in Branding &amp; SLA.
+                </p>
               </div>
 
               <div className="flex justify-end">

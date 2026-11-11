@@ -24,7 +24,8 @@ import { useAuth } from "@/lib/auth";
 import { EmptyState, ErrorState } from "@/components/states";
 import { initials, roleLabel, userLabel, type AppUser } from "@/lib/types";
 import { PasswordField } from "@/components/password-field";
-import { useWorkload } from "@/lib/api-extra";
+import { useWorkload, type RoleName } from "@/lib/api-extra";
+import { formatDistanceToNow, parseISO } from "date-fns";
 
 const json = { "Content-Type": "application/json" };
 const errMsg = (e: unknown, fallback: string) => (e as { data?: { error?: string } }).data?.error ?? fallback;
@@ -168,6 +169,9 @@ export function UsersSettings() {
                     >
                       {active ? "Active" : "Inactive"}
                     </Badge>
+                    <span className="text-[11px] text-muted-foreground" data-testid={`user-lastlogin-${u.id}`}>
+                      {u.lastLoginAt ? `Last sign-in ${formatDistanceToNow(parseISO(u.lastLoginAt), { addSuffix: true })}` : "No sign-in recorded yet"}
+                    </span>
                     {u.mustChangePassword && <Badge variant="outline" className="text-[11px] h-5 border-warning/40 text-warning bg-warning/10">Must change password</Badge>}
                     {loadOf(u.id) && (
                       <Badge
@@ -262,7 +266,7 @@ function UserFormDialog({
   const [name, setName] = useState(user?.name ?? "");
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
-  const [role, setRole] = useState<"admin" | "agent">((user?.role as "admin" | "agent") ?? "agent");
+  const [role, setRole] = useState<RoleName>((user?.role as RoleName) ?? "agent");
   const [password, setPassword] = useState(isNew ? tempPassword() : "");
   const [maxChats, setMaxChats] = useState<string>(user?.maxChats ? String(user.maxChats) : "");
   const [error, setError] = useState<string | null>(null);
@@ -323,10 +327,11 @@ function UserFormDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="u-role">Role</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as "admin" | "agent")} disabled={isSelf}>
+            <Select value={role} onValueChange={(v) => setRole(v as RoleName)} disabled={isSelf}>
               <SelectTrigger id="u-role" className="h-11"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="agent">Agent — handles conversations</SelectItem>
+                <SelectItem value="supervisor">Supervisor — monitors, whispers, takes over</SelectItem>
                 <SelectItem value="admin">Administrator — full access</SelectItem>
               </SelectContent>
             </Select>

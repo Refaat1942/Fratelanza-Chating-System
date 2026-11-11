@@ -3,21 +3,20 @@ import { db } from "@workspace/db";
 import { userPermissionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireAdmin, AuthRequest } from "../middlewares/auth";
-import { getEffectivePermissions, invalidatePermissionCache } from "../lib/permissions";
+import { getEffectivePermissions, invalidatePermissionCache, PERMISSION_KEYS } from "../lib/permissions";
+import { usersTable } from "@workspace/db";
+import { logAudit } from "../lib/audit";
 
 const router = Router();
 
-const PERM_KEYS = [
-  "canViewChats",
-  "canSendMessages",
-  "canViewReports",
-  "canManageCustomers",
-  "canManageSettings",
-] as const;
+const PERM_KEYS = PERMISSION_KEYS;
 
 router.get("/users/:id/permissions", requireAuth, requireAdmin, async (req, res) => {
   const userId = Number(req.params.id);
-  const role = (req.query.role as "admin" | "agent") ?? "agent";
+  // Always the user's real role (a client-supplied role would misreport).
+  const [u] = await db.select({ role: usersTable.role }).from(usersTable).where(eq(usersTable.id, userId));
+  if (!u) { res.status(404).json({ error: "Not found" }); return; }
+  const role = u.role;
   const effective = await getEffectivePermissions(userId, role);
   const [override] = await db
     .select()
@@ -26,7 +25,7 @@ router.get("/users/:id/permissions", requireAuth, requireAdmin, async (req, res)
   res.json({ userId, role, effective, override: override ?? null });
 });
 
-router.put("/users/:id/permissions", requireAuth, requireAdmin, async (req, res) => {
+router.put("/users/:id/permissions", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const userId = Number(req.params.id);
   const body = req.body ?? {};
   const patch: Record<string, boolean | null> = {};
@@ -35,6 +34,8 @@ router.put("/users/:id/permissions", requireAuth, requireAdmin, async (req, res)
     if (body[key] === null) patch[key] = null;
     else if (typeof body[key] === "boolean") patch[key] = body[key];
   }
+
+  void logAudit({ actorId: req.user?.id, action: "permissions.user_changed", entityType: "user", entityId: userId, details: patch });
 
   const [existing] = await db
     .select()
@@ -54,22 +55,14 @@ router.put("/users/:id/permissions", requireAuth, requireAdmin, async (req, res)
 
   const [row] = await db
     .insert(userPermissionsTable)
-    .values({
-      userId,
-      canViewChats: patch.canViewChats ?? null,
-      canSendMessages: patch.canSendMessages ?? null,
-      canViewReports: patch.canViewReports ?? null,
-      canManageCustomers: patch.canManageCustomers ?? null,
-      canManageSettings: patch.canManageSettings ?? null,
-    })
+    .values({ userId, ...patch })
     .returning();
   invalidatePermissionCache();
   res.json(row);
 });
 
 router.get("/me/permissions", requireAuth, async (req: AuthRequest, res) => {
-  const role = req.user!.role as "admin" | "agent";
-  const perms = await getEffectivePermissions(req.user!.id, role);
+  const perms = await getEffectivePermissions(req.user!.id, req.user!.role);
   res.json(perms);
 });
 

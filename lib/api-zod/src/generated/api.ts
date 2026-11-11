@@ -28,7 +28,7 @@ export const LoginResponse = zod.object({
     id: zod.number(),
     name: zod.string(),
     email: zod.string(),
-    role: zod.enum(["admin", "agent"]),
+    role: zod.enum(["admin", "supervisor", "agent"]),
     status: zod.enum(["available", "busy", "offline"]),
     createdAt: zod.coerce.date(),
   }),
@@ -41,7 +41,7 @@ export const GetMeResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["admin", "agent"]),
+  role: zod.enum(["admin", "supervisor", "agent"]),
   status: zod.enum(["available", "busy", "offline"]),
   createdAt: zod.coerce.date(),
 });
@@ -53,7 +53,7 @@ export const ListUsersResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["admin", "agent"]),
+  role: zod.enum(["admin", "supervisor", "agent"]),
   status: zod.enum(["available", "busy", "offline"]),
   createdAt: zod.coerce.date(),
 });
@@ -66,7 +66,7 @@ export const CreateUserBody = zod.object({
   name: zod.string(),
   email: zod.string().email(),
   password: zod.string(),
-  role: zod.enum(["admin", "agent"]),
+  role: zod.enum(["admin", "supervisor", "agent"]),
 });
 
 /**
@@ -80,7 +80,7 @@ export const GetUserResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["admin", "agent"]),
+  role: zod.enum(["admin", "supervisor", "agent"]),
   status: zod.enum(["available", "busy", "offline"]),
   createdAt: zod.coerce.date(),
 });
@@ -95,7 +95,7 @@ export const UpdateUserParams = zod.object({
 export const UpdateUserBody = zod.object({
   name: zod.string().optional(),
   email: zod.string().optional(),
-  role: zod.enum(["admin", "agent"]).optional(),
+  role: zod.enum(["admin", "supervisor", "agent"]).optional(),
   password: zod.string().optional(),
 });
 
@@ -103,7 +103,7 @@ export const UpdateUserResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["admin", "agent"]),
+  role: zod.enum(["admin", "supervisor", "agent"]),
   status: zod.enum(["available", "busy", "offline"]),
   createdAt: zod.coerce.date(),
 });
@@ -228,7 +228,7 @@ export const GetCustomerConversationsResponseItem = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -277,7 +277,7 @@ export const ListConversationsResponseItem = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -332,7 +332,7 @@ export const GetConversationResponse = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -381,7 +381,7 @@ export const UpdateConversationResponse = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -430,7 +430,7 @@ export const PatchConversationResponse = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -477,7 +477,7 @@ export const AssignConversationResponse = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -520,7 +520,7 @@ export const ResolveConversationResponse = zod.object({
       id: zod.number(),
       name: zod.string(),
       email: zod.string(),
-      role: zod.enum(["admin", "agent"]),
+      role: zod.enum(["admin", "supervisor", "agent"]),
       status: zod.enum(["available", "busy", "offline"]),
       createdAt: zod.coerce.date(),
     })
@@ -757,7 +757,7 @@ export const UpdateMyStatusResponse = zod.object({
   id: zod.number(),
   name: zod.string(),
   email: zod.string(),
-  role: zod.enum(["admin", "agent"]),
+  role: zod.enum(["admin", "supervisor", "agent"]),
   status: zod.enum(["available", "busy", "offline"]),
   createdAt: zod.coerce.date(),
 });

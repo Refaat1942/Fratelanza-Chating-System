@@ -1066,7 +1066,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, agent]
+          enum: [admin, supervisor, agent]
         status:
           type: string
           enum: [available, busy, offline]
@@ -1139,7 +1139,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, agent]
+          enum: [admin, supervisor, agent]
       required:
         - name
         - email
@@ -1155,7 +1155,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, agent]
+          enum: [admin, supervisor, agent]
         password:
           type: string
 

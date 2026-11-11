@@ -65,6 +65,9 @@
   --success-foreground: 0 0% 100%;
   --warning: 32 92% 36%;
   --warning-foreground: 0 0% 100%;
+  /* Whisper Mode (private supervisor messages): violet, distinct from notes (amber) */
+  --whisper: 262 52% 47%;
+  --whisper-foreground: 0 0% 100%;
   --info: 212 80% 42%;
   --info-foreground: 0 0% 100%;
 
@@ -123,6 +126,8 @@
   --destructive: 0 72% 58%;
   --success: 152 55% 42%;
   --warning: 36 92% 52%;
+  --whisper: 262 70% 72%;
+  --whisper-foreground: 262 40% 12%;
   --info: 212 85% 64%;
 
   --bubble-out: 193 82% 26%;

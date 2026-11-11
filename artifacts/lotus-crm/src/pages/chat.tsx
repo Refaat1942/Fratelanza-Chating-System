@@ -44,6 +44,9 @@ import {
   ChevronRight,
   Lock,
   UserPlus,
+  Eye,
+  ShieldCheck,
+  Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,7 +75,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { FaWhatsapp, FaFacebookMessenger, FaInstagram, FaSms } from "react-icons/fa";
 import { useLocation, useSearch } from "wouter";
-import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, type BulkAction } from "@/lib/api-extra";
+import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, useTakeover, useReleaseTakeover, type BulkAction } from "@/lib/api-extra";
+import { WhisperPanel } from "@/components/whisper-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -542,7 +546,7 @@ export default function ChatPage() {
             ids={[...picked]}
             topics={(topics ?? []).filter((t) => t.isActive)}
             lists={lists}
-            isAdmin={me?.role === "admin"}
+            isAdmin={me?.role === "admin" || me?.role === "supervisor"}
             onClear={() => setPicked(new Set())}
             onSelectAll={() => setPicked(new Set(conversations.map((c) => c.id)))}
             total={conversations.length}
@@ -777,13 +781,26 @@ function ChatCenter({
 
   const isAssignedToMe = !!conv?.assignedAgentId && conv.assignedAgentId === currentUser?.id;
   const isAdmin = currentUser?.role === "admin";
+  // Supervision: a lead looking at someone else's live chat is "monitoring".
+  const takeoverFrom = (conv as { takeoverFromAgentId?: number | null } | undefined)?.takeoverFromAgentId ?? null;
+  const canWhisper = !!perms?.canWhisper;
+  const isMonitoring = !!conv?.assignedAgentId && !isAssignedToMe && !!perms?.canMonitorChats;
+  const supervisorReadOnly = isMonitoring && !isAdmin; // admins keep their old "reply anywhere" power
+  const iHoldTakeover = isAssignedToMe && takeoverFrom !== null;
+  const takeoverMut = useTakeover();
+  const releaseMut = useReleaseTakeover();
+  const showWhisper = !!conv && conv.status !== "completed" && (
+    (canWhisper && (isMonitoring || iHoldTakeover)) || (!canWhisper && isAssignedToMe)
+  );
+  const whisperAgentName = iHoldTakeover ? null : conv?.assignedAgent ? userLabel(conv.assignedAgent as AppUser) : null;
   const mustClaim = !!conv && !conv.assignedAgentId && !isAdmin;
   const channel = (conv as { channel?: string } | undefined)?.channel ?? "whatsapp";
 
   // ---- mark read (only while the tab is visible) ----
   const unread = conv?.unreadCount ?? 0;
   useEffect(() => {
-    if (!conv || unread === 0 || mustClaim) return;
+    // A supervisor watching someone else's chat must not clear the agent's unread badge.
+    if (!conv || unread === 0 || mustClaim || isMonitoring) return;
     if (document.visibilityState !== "visible") return;
     let cancelled = false;
     markConversationRead(conversationId)
@@ -795,7 +812,7 @@ function ChatCenter({
       })
       .catch(() => { /* non-critical */ });
     return () => { cancelled = true; };
-  }, [conversationId, unread, conv, mustClaim, queryClient, messages?.length]);
+  }, [conversationId, unread, conv, mustClaim, isMonitoring, queryClient, messages?.length]);
 
   useEffect(() => {
     const onVisible = () => {
@@ -921,6 +938,18 @@ function ChatCenter({
       onError: () => toast({ title: "Could not reopen", variant: "destructive" }),
     });
   };
+  const handleTakeover = () => {
+    takeoverMut.mutate(conversationId, {
+      onSuccess: () => { toast({ title: "You took over this chat", description: "Replies now go to the customer from you. Hand it back when done." }); invalidateLists(); },
+      onError: (e) => toast({ title: "Could not take over", description: (e as { data?: { error?: string } }).data?.error, variant: "destructive" }),
+    });
+  };
+  const handleRelease = () => {
+    releaseMut.mutate(conversationId, {
+      onSuccess: () => { toast({ title: "Chat handed back" }); invalidateLists(); },
+      onError: (e) => toast({ title: "Could not hand back", description: (e as { data?: { error?: string } }).data?.error, variant: "destructive" }),
+    });
+  };
   const handleClaim = () => {
     if (!currentUser) return;
     assignMut.mutate({ id: conversationId, data: { agentId: currentUser.id } }, {
@@ -997,6 +1026,23 @@ function ChatCenter({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {isMonitoring && (
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-whisper/40 bg-whisper/10 px-2 py-0.5 text-[11px] font-medium text-whisper" data-testid="badge-monitoring">
+              <Eye className="h-3 w-3" aria-hidden /> Monitoring
+            </span>
+          )}
+          {isMonitoring && perms?.canTakeover && conv?.status !== "completed" && takeoverFrom === null && (
+            <Button size="sm" variant="outline" className="h-9" onClick={handleTakeover} disabled={takeoverMut.isPending} data-testid="btn-takeover">
+              <ShieldCheck className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Take over</span>
+            </Button>
+          )}
+          {iHoldTakeover && (
+            <Button size="sm" variant="outline" className="h-9" onClick={handleRelease} disabled={releaseMut.isPending} data-testid="btn-release">
+              <Undo2 className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Hand back</span>
+            </Button>
+          )}
           {conv && conv.status !== "completed" && (isAssignedToMe || isAdmin) && (
             <Button size="sm" variant="outline" className="h-9" onClick={handleResolve} disabled={resolveMut.isPending} data-testid="btn-resolve">
               <CheckCircle2 className="h-4 w-4 sm:mr-2 text-success" />
@@ -1117,13 +1163,33 @@ function ChatCenter({
         )}
       </div>
 
+      {showWhisper && (
+        <div className="bg-card border-t border-border">
+          <WhisperPanel conversationId={conversationId} meId={currentUser?.id} isLead={canWhisper} agentName={whisperAgentName} />
+        </div>
+      )}
+
       {/* Composer */}
+      {iHoldTakeover && conv?.status !== "completed" && (
+        <p role="status" className="bg-whisper/10 border-t border-whisper/30 px-4 py-1.5 text-xs text-whisper" data-testid="takeover-banner">
+          You have taken over this chat — your replies go to the customer. Use “Hand back” to return it to the agent.
+        </p>
+      )}
       {conv?.status === "completed" ? (
         <div className="p-3 bg-card border-t border-border flex items-center justify-between gap-3 pb-safe">
           <p className="text-sm text-muted-foreground">This conversation is completed.</p>
           <Button size="sm" variant="outline" onClick={handleReopen} disabled={patchMut.isPending}>
             <RotateCcw className="h-4 w-4 mr-2" /> Reopen
           </Button>
+        </div>
+      ) : supervisorReadOnly ? (
+        <div className="p-3 bg-card border-t border-border flex items-center justify-between gap-3 pb-safe" data-testid="monitor-bar">
+          <p className="text-sm text-muted-foreground">
+            You are monitoring {whisperAgentName ?? "the agent"}'s chat. Guide them with a whisper{perms?.canTakeover ? ", or take over to reply yourself" : ""}.
+          </p>
+          {perms?.canTakeover && takeoverFrom === null && (
+            <Button size="sm" onClick={handleTakeover} disabled={takeoverMut.isPending}>Take over</Button>
+          )}
         </div>
       ) : mustClaim ? (
         <div className="p-3 bg-card border-t border-border flex items-center justify-between gap-3 pb-safe">
@@ -1224,7 +1290,7 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const [replySearch, setReplySearch] = useState("");
   const { data: users } = useListUsers();
   const { data: me } = useGetMe();
-  const { data: workload } = useWorkload(me?.role === "admin");
+  const { data: workload } = useWorkload(me?.role === "admin" || me?.role === "supervisor");
   const loadOf = (id: number) => workload?.find((w) => w.id === id);
   const { data: allTags } = useListTags();
   const customer = conv?.customer;
@@ -1326,7 +1392,7 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
                   <Select
                     value={conv?.assignedAgentId ? String(conv.assignedAgentId) : "unassigned"}
                     onValueChange={handleAssign}
-                    disabled={patchMut.isPending || me?.role !== "admin"}
+                    disabled={patchMut.isPending || (me?.role !== "admin" && me?.role !== "supervisor")}
                   >
                     <SelectTrigger className="h-8 text-xs bg-background" data-testid="select-assignee">
                       <SelectValue placeholder="Unassigned" />

@@ -7,6 +7,7 @@ import { usersTable, passwordResetTokensTable } from "@workspace/db";
 import { requireAuth, AuthRequest, JWT_SECRET } from "../middlewares/auth";
 import { hit, clear } from "../lib/rate-limit";
 import { hashToken, validatePassword } from "../lib/passwords";
+import { logAudit } from "../lib/audit";
 
 const router = Router();
 
@@ -39,6 +40,7 @@ router.post("/auth/login", async (req, res) => {
   // Same response for unknown user / wrong password (no account probing).
   const valid = user ? await bcrypt.compare(password, user.passwordHash) : false;
   if (!user || !valid) {
+    void logAudit({ actorId: user?.id ?? null, action: "auth.login_failed", entityType: "user", entityId: user?.id ?? null, details: { email: login, ip: req.ip } });
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }
@@ -48,6 +50,8 @@ router.post("/auth/login", async (req, res) => {
   }
 
   clear(key);
+  await db.update(usersTable).set({ lastLoginAt: new Date() }).where(eq(usersTable.id, user.id));
+  void logAudit({ actorId: user.id, action: "auth.login", entityType: "user", entityId: user.id, details: { ip: req.ip } });
   const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
   res.json({ token, user: safeUser(user) });
 });

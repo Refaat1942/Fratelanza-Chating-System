@@ -6,6 +6,9 @@ import { requireAuth, AuthRequest } from "../middlewares/auth";
 import { requirePermission } from "../middlewares/permissions";
 import { tryAutoAssign, drainQueue } from "../lib/assignment";
 import type { Server as IOServer } from "socket.io";
+import { isLead } from "../lib/roles";
+import { seesAllChats } from "../lib/access";
+import { logAudit, logMonitorOpen } from "../lib/audit";
 
 const router = Router();
 
@@ -26,6 +29,8 @@ async function getConversationWithRelations(id: number) {
     createdAt: conversationsTable.createdAt,
     resolvedAt: conversationsTable.resolvedAt,
     queuedAt: conversationsTable.queuedAt,
+    takeoverFromAgentId: conversationsTable.takeoverFromAgentId,
+    takeoverAt: conversationsTable.takeoverAt,
     customer: {
       id: customersTable.id,
       name: customersTable.name,
@@ -70,6 +75,8 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
     createdAt: conversationsTable.createdAt,
     resolvedAt: conversationsTable.resolvedAt,
     queuedAt: conversationsTable.queuedAt,
+    takeoverFromAgentId: conversationsTable.takeoverFromAgentId,
+    takeoverAt: conversationsTable.takeoverAt,
     customer: {
       id: customersTable.id,
       name: customersTable.name,
@@ -97,11 +104,11 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
   if (agentId) conditions.push(eq(conversationsTable.assignedAgentId, Number(agentId)));
   if (search) conditions.push(ilike(customersTable.name, `%${search}%`));
   if (tag) conditions.push(sql<boolean>`${tag} = ANY(${conversationsTable.tags})`);
-  if (req.user?.role === "agent") {
+  if (!(await seesAllChats(req.user!))) {
     // Own chats + the unassigned queue (agents must be able to see a queued
     // chat in order to claim it).
     conditions.push(
-      or(eq(conversationsTable.assignedAgentId, req.user.id), isNull(conversationsTable.assignedAgentId))!,
+      or(eq(conversationsTable.assignedAgentId, req.user!.id), isNull(conversationsTable.assignedAgentId))!,
     );
   }
 
@@ -116,8 +123,8 @@ router.get("/conversations", requireAuth, requirePermission("canViewChats"), asy
 // caller can see. The client only re-fetches the full list when `version` moves.
 router.get("/inbox/sync", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
   const scope =
-    req.user?.role === "agent"
-      ? sql`WHERE assigned_agent_id = ${req.user.id} OR assigned_agent_id IS NULL`
+    !(await seesAllChats(req.user!))
+      ? sql`WHERE assigned_agent_id = ${req.user!.id} OR assigned_agent_id IS NULL`
       : sql``;
   const result = await db.execute(sql`
     SELECT
@@ -141,7 +148,7 @@ router.post("/conversations/:id/read", requireAuth, requirePermission("canViewCh
   if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const existing = await getConversationWithRelations(id);
   if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-  if (req.user?.role === "agent" && existing.assignedAgentId !== req.user.id) {
+  if (existing.assignedAgentId !== req.user!.id && !(await seesAllChats(req.user!))) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   if (existing.unreadCount > 0) {
@@ -159,7 +166,8 @@ router.post("/conversations/bulk", requireAuth, requirePermission("canSendMessag
     return;
   }
   const user = req.user!;
-  const isAdmin = user.role === "admin";
+  // Admins and monitoring supervisors may act on any chat.
+  const isAdmin = isLead(user.role) && (await seesAllChats(user));
   const idList = sql.join((ids as number[]).map((i) => sql`${i}`), sql`, `);
   const scope = isAdmin
     ? sql``
@@ -205,7 +213,7 @@ router.post("/conversations/bulk", requireAuth, requirePermission("canSendMessag
     case "assign": {
       // Admin hands chats to a specific person (or back to the queue with null).
       // Limits apply to automatic distribution; an admin may deliberately exceed them.
-      if (!isAdmin) { res.status(403).json({ error: "Only admins can assign chats to other people" }); return; }
+      if (!isAdmin) { res.status(403).json({ error: "Only admins and supervisors can assign chats to other people" }); return; }
       if (value === null) {
         result = await db.execute(sql`UPDATE conversations SET assigned_agent_id = NULL, status = CASE WHEN status = 'completed' THEN status ELSE 'pending' END, queued_at = COALESCE(queued_at, NOW()) WHERE id IN (${idList})`);
         break;
@@ -221,6 +229,9 @@ router.post("/conversations/bulk", requireAuth, requirePermission("canSendMessag
       return;
   }
   const updated = Number((result as { rowCount?: number | null }).rowCount ?? 0);
+  if ((action === "assign" || action === "assignMe") && updated > 0) {
+    void logAudit({ actorId: user.id, action: "conversation.bulk_assigned", entityType: "conversation", details: { ids, to: action === "assignMe" ? user.id : value, updated } });
+  }
   const io = req.app.get("io") as IOServer | undefined;
   io?.emit("conversation_updated", { conversationId: 0 });
   if (action === "status" && value === "completed") void drainQueue(io);
@@ -249,9 +260,13 @@ router.get("/conversations/:id", requireAuth, requirePermission("canViewChats"),
   const conv = await getConversationWithRelations(id);
   if (!conv) { res.status(404).json({ error: "Not found" }); return; }
   // Agents can view their own chats and unassigned ones (to claim them)
-  if (req.user?.role === "agent" && conv.assignedAgentId !== null && conv.assignedAgentId !== req.user.id) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
+  if (conv.assignedAgentId !== null && conv.assignedAgentId !== req.user!.id) {
+    if (!(await seesAllChats(req.user!))) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    // A supervisor opening someone else's live chat is recorded.
+    if (req.user!.role !== "agent") logMonitorOpen(req.user!.id, id, conv.assignedAgentId);
   }
   res.json(conv);
 });
@@ -260,7 +275,7 @@ router.put("/conversations/:id", requireAuth, requirePermission("canSendMessages
   const id = Number(req.params.id);
   const existing = await getConversationWithRelations(id);
   if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-  if (req.user?.role === "agent" && existing.assignedAgentId !== req.user.id) {
+  if (existing.assignedAgentId !== req.user!.id && !(await seesAllChats(req.user!))) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   const { tags, status, assignedAgentId } = req.body;
@@ -270,11 +285,12 @@ router.put("/conversations/:id", requireAuth, requirePermission("canSendMessages
   // Reassignment is admin-only; agents must use POST /conversations/:id/assign
   // to self-claim. This keeps PUT, PATCH, and /assign on a single policy.
   if (assignedAgentId !== undefined) {
-    if (req.user?.role !== "admin") {
-      res.status(403).json({ error: "Only admins can reassign conversations" });
+    if (!(isLead(req.user?.role) && (await seesAllChats(req.user!)))) {
+      res.status(403).json({ error: "Only admins and supervisors can reassign conversations" });
       return;
     }
     updates.assignedAgentId = assignedAgentId;
+    void logAudit({ actorId: req.user!.id, action: "conversation.assigned", entityType: "conversation", entityId: id, details: { from: existing.assignedAgentId, to: assignedAgentId } });
   }
   await db.update(conversationsTable).set(updates).where(eq(conversationsTable.id, id));
   const full = await getConversationWithRelations(id);
@@ -287,7 +303,7 @@ router.patch("/conversations/:id", requireAuth, requirePermission("canSendMessag
   if (!existing) { res.status(404).json({ error: "Not found" }); return; }
   // Agents can only patch conversations explicitly assigned to them.
   // Unassigned conversations require the dedicated /assign endpoint or admin.
-  if (req.user?.role === "agent" && existing.assignedAgentId !== req.user.id) {
+  if (existing.assignedAgentId !== req.user!.id && !(await seesAllChats(req.user!))) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   const { tags, status, assignedAgentId, chatReasonId } = req.body;
@@ -310,11 +326,12 @@ router.patch("/conversations/:id", requireAuth, requirePermission("canSendMessag
   }
   // Only admins may reassign conversations to another agent.
   if (assignedAgentId !== undefined) {
-    if (req.user?.role !== "admin") {
-      res.status(403).json({ error: "Only admins can reassign conversations" });
+    if (!(isLead(req.user?.role) && (await seesAllChats(req.user!)))) {
+      res.status(403).json({ error: "Only admins and supervisors can reassign conversations" });
       return;
     }
     updates.assignedAgentId = assignedAgentId;
+    void logAudit({ actorId: req.user!.id, action: "conversation.assigned", entityType: "conversation", entityId: id, details: { from: existing.assignedAgentId, to: assignedAgentId } });
   }
   if (Object.keys(updates).length === 0) { res.json(existing); return; }
   await db.update(conversationsTable).set(updates).where(eq(conversationsTable.id, id));
@@ -330,15 +347,16 @@ router.post("/conversations/:id/assign", requireAuth, requirePermission("canSend
   // Agents may only self-claim conversations that are currently unassigned.
   // They cannot reassign someone else's conversation or assign to a different
   // agent. Admins may assign any conversation to any agent (or unassign).
-  if (req.user?.role === "agent") {
+  if (!(isLead(req.user?.role) && (await seesAllChats(req.user!)))) {
     if (existing.assignedAgentId !== null) {
       res.status(403).json({ error: "Forbidden" }); return;
     }
-    if (agentId !== req.user.id) {
+    if (agentId !== req.user!.id) {
       res.status(403).json({ error: "Agents can only claim for themselves" }); return;
     }
   }
   await db.update(conversationsTable).set({ assignedAgentId: agentId || null }).where(eq(conversationsTable.id, id));
+  void logAudit({ actorId: req.user!.id, action: "conversation.assigned", entityType: "conversation", entityId: id, details: { from: existing.assignedAgentId, to: agentId || null } });
   const full = await getConversationWithRelations(id);
 
   const io = req.app.get("io") as IOServer | undefined;
@@ -354,7 +372,7 @@ router.post("/conversations/:id/resolve", requireAuth, requirePermission("canSen
   const id = Number(req.params.id);
   const existing = await getConversationWithRelations(id);
   if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-  if (req.user?.role === "agent" && existing.assignedAgentId !== req.user.id) {
+  if (existing.assignedAgentId !== req.user!.id && !(await seesAllChats(req.user!))) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   await db.update(conversationsTable).set({ status: "completed", resolvedAt: new Date() }).where(eq(conversationsTable.id, id));

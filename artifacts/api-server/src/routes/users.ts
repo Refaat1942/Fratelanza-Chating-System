@@ -7,6 +7,8 @@ import { requireAuth, requireAdmin, AuthRequest } from "../middlewares/auth";
 import { drainQueue } from "../lib/assignment";
 import { newResetToken, validatePassword } from "../lib/passwords";
 import type { Server as IOServer } from "socket.io";
+import { isRole, isLead } from "../lib/roles";
+import { logAudit } from "../lib/audit";
 
 const router = Router();
 
@@ -20,6 +22,7 @@ const publicUserCols = {
   isActive: usersTable.isActive,
   mustChangePassword: usersTable.mustChangePassword,
   maxChats: usersTable.maxChats,
+  lastLoginAt: usersTable.lastLoginAt,
   createdAt: usersTable.createdAt,
 } as const;
 
@@ -51,8 +54,9 @@ async function activeAdminCount(exceptId?: number): Promise<number> {
   return n;
 }
 
-// Workload per person: open+pending chats vs. their limit (admin assignment UI).
-router.get("/users/workload", requireAuth, requireAdmin, async (_req, res) => {
+// Workload per person: open+pending chats vs. their limit (admin/supervisor assignment UI).
+router.get("/users/workload", requireAuth, async (req: AuthRequest, res) => {
+  if (!isLead(req.user?.role)) { res.status(403).json({ error: "Admin or supervisor access required" }); return; }
   const [settings] = await db.select({ max: settingsTable.maxChatsPerAgent }).from(settingsTable).where(eq(settingsTable.id, 1));
   const rows = await db
     .select({
@@ -83,7 +87,7 @@ router.get("/users", requireAuth, async (req: AuthRequest, res) => {
   res.json(rows);
 });
 
-router.post("/users", requireAuth, requireAdmin, async (req, res) => {
+router.post("/users", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const { name, displayName, email, password, role, maxChats } = req.body ?? {};
   const cap = parseMaxChats(maxChats);
   if (cap === "invalid") { res.status(400).json({ error: "Max chats must be between 1 and 200 (or empty for the default)" }); return; }
@@ -96,8 +100,8 @@ router.post("/users", requireAuth, requireAdmin, async (req, res) => {
     res.status(400).json({ error: "Enter a valid email address" });
     return;
   }
-  if (role !== "admin" && role !== "agent") {
-    res.status(400).json({ error: "Role must be admin or agent" });
+  if (!isRole(role)) {
+    res.status(400).json({ error: "Role must be admin, supervisor or agent" });
     return;
   }
   const bad = validatePassword(password);
@@ -122,6 +126,7 @@ router.post("/users", requireAuth, requireAdmin, async (req, res) => {
       maxChats: cap ?? null,
     })
     .returning(publicUserCols);
+  void logAudit({ actorId: req.user?.id, action: "user.created", entityType: "user", entityId: user.id, details: { email: cleanEmail, role } });
   res.status(201).json(user);
 });
 
@@ -188,8 +193,8 @@ router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res
     updates.email = e;
   }
   if (role !== undefined) {
-    if (role !== "admin" && role !== "agent") {
-      res.status(400).json({ error: "Role must be admin or agent" });
+    if (!isRole(role)) {
+      res.status(400).json({ error: "Role must be admin, supervisor or agent" });
       return;
     }
     if (role !== existing.role && existing.role === "admin" && (await activeAdminCount(id)) === 0) {
@@ -212,6 +217,11 @@ router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res
     return;
   }
   const [user] = await db.update(usersTable).set(updates).where(eq(usersTable.id, id)).returning(publicUserCols);
+  const changed = Object.keys(updates).filter((k) => k !== "passwordHash");
+  void logAudit({
+    actorId: req.user?.id, action: "user.updated", entityType: "user", entityId: id,
+    details: { fields: updates.passwordHash ? [...changed.filter((k) => k !== "mustChangePassword"), "password"] : changed, ...(updates.role && updates.role !== existing.role ? { roleFrom: existing.role, roleTo: updates.role } : {}) },
+  });
   // A raised limit may free room for queued chats.
   if (cap !== undefined) void drainQueue(req.app.get("io") as IOServer | undefined);
   res.json(user);
@@ -240,6 +250,7 @@ router.patch("/users/:id/active", requireAuth, requireAdmin, async (req: AuthReq
     .set(isActive ? { isActive: true } : { isActive: false, status: "offline" })
     .where(eq(usersTable.id, id))
     .returning(publicUserCols);
+  void logAudit({ actorId: req.user?.id, action: isActive ? "user.activated" : "user.deactivated", entityType: "user", entityId: id });
   // An agent leaving the pool frees their chats for redistribution.
   if (!isActive) {
     const io = req.app.get("io") as IOServer | undefined;
@@ -250,13 +261,14 @@ router.patch("/users/:id/active", requireAuth, requireAdmin, async (req: AuthReq
 
 // Admin issues a one-time reset link (valid 1 hour). The token is returned
 // ONCE in this response and only its hash is stored; it is never logged.
-router.post("/users/:id/reset-link", requireAuth, requireAdmin, async (req, res) => {
+router.post("/users/:id/reset-link", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const id = Number(req.params.id);
   const [target] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, id));
   if (!target) { res.status(404).json({ error: "Not found" }); return; }
   const { token, hash } = newResetToken();
   const expiresAt = new Date(Date.now() + RESET_TTL_MS);
   await db.insert(passwordResetTokensTable).values({ userId: id, tokenHash: hash, expiresAt });
+  void logAudit({ actorId: req.user?.id, action: "user.reset_link_issued", entityType: "user", entityId: id });
   res.json({ token, expiresAt });
 });
 
@@ -279,6 +291,7 @@ router.delete("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, 
     res.status(409).json({ error: "This user has conversation history and cannot be deleted. Deactivate them instead." });
     return;
   }
+  void logAudit({ actorId: req.user?.id, action: "user.deleted", entityType: "user", entityId: id, details: { email: target.email } });
   res.status(204).send();
 });
 

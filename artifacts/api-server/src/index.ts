@@ -2,7 +2,7 @@ import { createServer } from "http";
 import { Server as IOServer, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import { db } from "@workspace/db";
-import { usersTable, conversationsTable } from "@workspace/db";
+import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import app from "./app";
 import { logger } from "./lib/logger";
@@ -11,9 +11,12 @@ import { JWT_SECRET } from "./middlewares/auth";
 import { processDueScheduledCampaigns } from "./lib/campaign-sender";
 import { bootTopics } from "./lib/topics";
 import { loadWebhookStats } from "./lib/webhook-stats";
+import { canReadConversation } from "./lib/access";
+import { hasPermission } from "./lib/permissions";
+import { isLead } from "./lib/roles";
 
 interface AuthedSocket extends Socket {
-  data: { userId: number; role: "admin" | "agent" };
+  data: { userId: number; role: string };
 }
 
 // A failed fire-and-forget background task must never take the whole API down.
@@ -70,20 +73,8 @@ io.use(async (socket, next) => {
   }
 });
 
-async function canAccessConversation(
-  userId: number,
-  role: "admin" | "agent",
-  conversationId: number,
-): Promise<boolean> {
-  if (role === "admin") return true;
-  const [conv] = await db
-    .select({ assignedAgentId: conversationsTable.assignedAgentId })
-    .from(conversationsTable)
-    .where(eq(conversationsTable.id, conversationId));
-  if (!conv) return false;
-  // Aligned with the HTTP read policy: agents may follow their own chats and
-  // unassigned (queued) ones; sending still requires claiming the chat.
-  return conv.assignedAgentId === null || conv.assignedAgentId === userId;
+function canAccessConversation(userId: number, role: string, conversationId: number): Promise<boolean> {
+  return canReadConversation({ id: userId, role }, conversationId);
 }
 
 io.on("connection", (rawSocket) => {
@@ -92,6 +83,15 @@ io.on("connection", (rawSocket) => {
     { socketId: socket.id, userId: socket.data.userId },
     "Socket connected",
   );
+  // Personal room (whispers addressed to this agent) and, for supervisors
+  // allowed to whisper, the shared leads room. Whispers are only ever emitted
+  // to these rooms — never to a conversation room or to everyone.
+  void socket.join(`user:${socket.data.userId}`);
+  if (isLead(socket.data.role)) {
+    void hasPermission(socket.data.userId, socket.data.role, "canWhisper").then((ok) => {
+      if (ok) void socket.join("whisper-leads");
+    });
+  }
 
   socket.on("join_conversation", async (conversationId: number) => {
     if (typeof conversationId !== "number" || !Number.isFinite(conversationId)) return;
@@ -134,13 +134,9 @@ io.on("connection", (rawSocket) => {
     },
   );
 
-  socket.on(
-    "message_status",
-    ({ messageId, status }: { messageId: number; status: string }) => {
-      if (typeof messageId !== "number") return;
-      io.emit("message_status", { messageId, status });
-    },
-  );
+  // Delivery/read ticks come only from the server (WhatsApp status webhook).
+  // There is deliberately no client "message_status" relay: it let any
+  // logged-in browser broadcast fake ticks to everyone.
 
   socket.on("disconnect", () => {
     logger.info({ socketId: socket.id }, "Socket disconnected");
