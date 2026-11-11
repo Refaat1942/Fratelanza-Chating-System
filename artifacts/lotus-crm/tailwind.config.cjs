@@ -36,6 +36,7 @@ module.exports = {
         },
         success: { DEFAULT: "hsl(var(--success))", foreground: "hsl(var(--success-foreground))" },
         warning: { DEFAULT: "hsl(var(--warning))", foreground: "hsl(var(--warning-foreground))" },
+        whisper: { DEFAULT: "hsl(var(--whisper))", foreground: "hsl(var(--whisper-foreground))" },
         info: { DEFAULT: "hsl(var(--info))", foreground: "hsl(var(--info-foreground))" },
         bubble: {
           out: "hsl(var(--bubble-out))",

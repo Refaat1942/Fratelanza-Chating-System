@@ -22,6 +22,7 @@ export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 export const UserRole = {
   admin: "admin",
+  supervisor: "supervisor",
   agent: "agent",
 } as const;
 
@@ -103,6 +104,7 @@ export type CreateUserBodyRole =
 
 export const CreateUserBodyRole = {
   admin: "admin",
+  supervisor: "supervisor",
   agent: "agent",
 } as const;
 
@@ -118,6 +120,7 @@ export type UpdateUserBodyRole =
 
 export const UpdateUserBodyRole = {
   admin: "admin",
+  supervisor: "supervisor",
   agent: "agent",
 } as const;
 

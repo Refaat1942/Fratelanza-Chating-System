@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { requireAuth, AuthRequest } from "../middlewares/auth";
+import { seesAllChats } from "../lib/access";
 
 const router = Router();
 
@@ -20,7 +21,7 @@ router.get("/insights", requireAuth, async (req: AuthRequest, res) => {
   // only conversations + customers tied to chats assigned to them. Without
   // this, the endpoint would leak PII (names, phones, branches) for the
   // entire customer base to every authenticated agent.
-  const isAdmin = req.user!.role === "admin";
+  const isAdmin = await seesAllChats(req.user!);
   const userId = req.user!.id;
 
   // Read SLA threshold from settings (fallback to 15 min)

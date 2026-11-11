@@ -8,7 +8,7 @@ export function requirePermission(key: PermissionKey) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const role = req.user.role as "admin" | "agent";
+    const role = req.user.role;
     const allowed = await hasPermission(req.user.id, role, key);
     if (!allowed) {
       res.status(403).json({ error: `Permission denied: ${key}` });

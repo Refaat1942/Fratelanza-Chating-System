@@ -13,6 +13,9 @@ export const userPermissionsTable = pgTable("user_permissions", {
   canViewReports: boolean("can_view_reports"),
   canManageCustomers: boolean("can_manage_customers"),
   canManageSettings: boolean("can_manage_settings"),
+  canMonitorChats: boolean("can_monitor_chats"),
+  canWhisper: boolean("can_whisper"),
+  canTakeover: boolean("can_takeover"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

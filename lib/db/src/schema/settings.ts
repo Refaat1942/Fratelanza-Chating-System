@@ -21,6 +21,8 @@ export const settingsTable = pgTable("settings", {
   accentColor: text("accent_color"),
   // SLA threshold (in minutes) used for chat-monitoring "Late" status
   slaMinutes: integer("sla_minutes").notNull().default(15),
+  // Monitoring: an open chat with no activity for this many hours is "hanging".
+  hangingHours: integer("hanging_hours").notNull().default(24),
   // Default content topics are inserted once; afterwards the admin owns them.
   topicsSeeded: boolean("topics_seeded").notNull().default(false),
   // Settings → WhatsApp diagnostics counters, kept across restarts.

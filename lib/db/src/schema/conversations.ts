@@ -34,6 +34,10 @@ export const conversationsTable = pgTable("conversations", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
   queuedAt: timestamp("queued_at"),
+  // Supervisor takeover: who had the chat before a supervisor took it over
+  // (control is returned to them on release). Null = no takeover active.
+  takeoverFromAgentId: integer("takeover_from_agent_id"),
+  takeoverAt: timestamp("takeover_at"),
 });
 
 export const insertConversationSchema = createInsertSchema(

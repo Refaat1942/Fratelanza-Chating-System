@@ -6,6 +6,7 @@ export interface AppUser extends User {
   isActive?: boolean;
   mustChangePassword?: boolean;
   maxChats?: number | null;
+  lastLoginAt?: string | null;
 }
 
 /** Name shown everywhere in the UI — never the email. */
@@ -14,7 +15,7 @@ export function userLabel(u?: { name?: string | null; displayName?: string | nul
 }
 
 export function roleLabel(role?: string | null): string {
-  return role === "admin" ? "Administrator" : role === "agent" ? "Agent" : (role ?? "");
+  return role === "admin" ? "Administrator" : role === "supervisor" ? "Supervisor" : role === "agent" ? "Agent" : (role ?? "");
 }
 
 export function initials(name?: string | null): string {

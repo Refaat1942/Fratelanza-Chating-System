@@ -13,3 +13,5 @@ export * from "./not-ready-reasons";
 export * from "./user-permissions";
 export * from "./campaign-recipients";
 export * from "./password-reset-tokens";
+export * from "./whispers";
+export * from "./audit-logs";

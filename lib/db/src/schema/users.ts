@@ -6,7 +6,7 @@ export const usersTable = pgTable("users", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
-  role: text("role", { enum: ["admin", "agent"] }).notNull().default("agent"),
+  role: text("role", { enum: ["admin", "supervisor", "agent"] }).notNull().default("agent"),
   passwordHash: text("password_hash").notNull(),
   // Shown in the UI instead of the email (falls back to `name`).
   displayName: text("display_name"),
@@ -23,6 +23,7 @@ export const usersTable = pgTable("users", {
   lastAssignedAt: timestamp("last_assigned_at"),
   notReadyReasonId: integer("not_ready_reason_id"),
   notReadySince: timestamp("not_ready_since"),
+  lastLoginAt: timestamp("last_login_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

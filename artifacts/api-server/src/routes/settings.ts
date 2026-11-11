@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin, AuthRequest } from "../middlewares/auth";
 import { getSettings, updateSettings, drainQueue } from "../lib/assignment";
+import { logAudit } from "../lib/audit";
 import type { Server as IOServer } from "socket.io";
 
 const router = Router();
@@ -23,7 +24,7 @@ router.get("/branding", async (_req, res) => {
 });
 
 router.put("/settings", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
-  const { maxChatsPerAgent, autoAssign, assignmentStrategy, companyName, logoUrl, slaMinutes, primaryColor, accentColor } = req.body ?? {};
+  const { maxChatsPerAgent, autoAssign, assignmentStrategy, companyName, logoUrl, slaMinutes, primaryColor, accentColor, hangingHours } = req.body ?? {};
   const patch: Record<string, unknown> = {};
 
   if (maxChatsPerAgent !== undefined) {
@@ -36,6 +37,15 @@ router.put("/settings", requireAuth, requireAdmin, async (req: AuthRequest, res)
   }
 
   if (autoAssign !== undefined) patch.autoAssign = !!autoAssign;
+
+  if (hangingHours !== undefined) {
+    const n = Number(hangingHours);
+    if (!Number.isInteger(n) || n < 1 || n > 720) {
+      res.status(400).json({ error: "hangingHours must be 1-720" });
+      return;
+    }
+    patch.hangingHours = n;
+  }
 
   if (assignmentStrategy !== undefined) {
     if (!["round_robin", "least_busy"].includes(assignmentStrategy)) {
@@ -103,6 +113,7 @@ router.put("/settings", requireAuth, requireAdmin, async (req: AuthRequest, res)
   }
 
   const updated = await updateSettings(patch);
+  void logAudit({ actorId: req.user?.id, action: "settings.updated", entityType: "settings", details: { fields: Object.keys(patch) } });
 
   // If auto-assign was enabled / capacity raised, drain the queue immediately.
   const io = req.app.get("io") as IOServer | undefined;

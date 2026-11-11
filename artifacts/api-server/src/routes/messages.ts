@@ -8,33 +8,13 @@ import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { sendWhatsAppText, whatsappSendingConfigured } from "../lib/whatsapp";
 import { outboundEnabled, OUTBOUND_DISABLED_ERROR } from "../lib/outbound";
+import { canReadConversation, canSendInConversation } from "../lib/access";
 
 const router = Router();
 
-async function canAccessConversation(userId: number, role: string, convId: number): Promise<boolean> {
-  if (role === "admin") return true;
-  const [conv] = await db
-    .select({ assignedAgentId: conversationsTable.assignedAgentId })
-    .from(conversationsTable)
-    .where(eq(conversationsTable.id, convId))
-    .limit(1);
-  return !!conv && conv.assignedAgentId === userId;
-}
-
-// Agents may READ an unassigned (queued) chat so they can decide to claim it.
-async function canReadConversation(userId: number, role: string, convId: number): Promise<boolean> {
-  if (role === "admin") return true;
-  const [conv] = await db
-    .select({ assignedAgentId: conversationsTable.assignedAgentId })
-    .from(conversationsTable)
-    .where(eq(conversationsTable.id, convId))
-    .limit(1);
-  return !!conv && (conv.assignedAgentId === null || conv.assignedAgentId === userId);
-}
-
 router.get("/conversations/:id/messages", requireAuth, requirePermission("canViewChats"), async (req: AuthRequest, res) => {
   const convId = Number(req.params.id);
-  const allowed = await canReadConversation(req.user!.id, req.user!.role, convId);
+  const allowed = await canReadConversation(req.user!, convId);
   if (!allowed) { res.status(403).json({ error: "Forbidden" }); return; }
 
   // ?afterId=N returns only newer messages (cheap incremental polling).
@@ -50,7 +30,7 @@ router.get("/conversations/:id/messages", requireAuth, requirePermission("canVie
 
 router.post("/conversations/:id/messages", requireAuth, requirePermission("canSendMessages"), async (req: AuthRequest, res) => {
   const convId = Number(req.params.id);
-  const allowed = await canAccessConversation(req.user!.id, req.user!.role, convId);
+  const allowed = await canSendInConversation(req.user!, convId);
   if (!allowed) { res.status(403).json({ error: "Forbidden" }); return; }
 
   const { body, isNote, attachments } = req.body;
@@ -86,7 +66,7 @@ router.post("/conversations/:id/messages", requireAuth, requirePermission("canSe
   // trust a client-supplied senderType, which would let any logged-in user
   // impersonate the customer or system and corrupt analytics.
   const senderType: "agent" | "system" =
-    req.user!.role === "admin" || req.user!.role === "agent" ? "agent" : "system";
+    req.user!.role === "admin" || req.user!.role === "supervisor" || req.user!.role === "agent" ? "agent" : "system";
 
   const [message] = await db.insert(messagesTable).values({
     conversationId: convId,

@@ -8,6 +8,7 @@ import {
   Settings,
   Inbox,
   Megaphone,
+  Radar,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -28,6 +29,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { TopBar } from "@/components/top-bar";
 import { BrandLogo, BrandTagline } from "@/components/brand-logo";
 import { cn } from "@/lib/utils";
+import { SupervisionNotifier } from "@/components/supervision-notifier";
+import { useWhisperUnread } from "@/lib/api-extra";
 
 function NavLink({
   href,
@@ -80,6 +83,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const { data: perms } = useMyPermissions();
   const sync = useInboxSync(!!user && perms?.canViewChats !== false);
 
+  const { data: whisperUnread } = useWhisperUnread();
   const urgentCount = insights?.summary.urgentCount ?? 0;
   const unread = sync?.unread ?? 0;
   const companyName = branding?.companyName ?? "Fratelanza";
@@ -90,6 +94,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-app w-full overflow-hidden bg-background">
+      <SupervisionNotifier meId={user?.id} />
       <Sidebar className="border-r border-sidebar-border">
         <SidebarHeader className="px-4 py-4 border-b border-sidebar-border">
           <div className="flex items-center gap-3 min-w-0">
@@ -113,6 +118,15 @@ function Shell({ children }: { children: React.ReactNode }) {
             )}
             {perms?.canManageCustomers !== false && (
               <NavLink href="/customers" icon={Users} label="Customers" active={isActive("/customers")} />
+            )}
+            {perms?.canMonitorChats && (
+              <NavLink
+                href="/monitoring"
+                icon={Radar}
+                label="Live Monitor"
+                active={isActive("/monitoring")}
+                badge={whisperUnread?.total ?? 0}
+              />
             )}
             <NavLink href="/dashboard" icon={LayoutDashboard} label="Dashboard" active={isActive("/dashboard")} />
             {perms?.canViewChats !== false && (
