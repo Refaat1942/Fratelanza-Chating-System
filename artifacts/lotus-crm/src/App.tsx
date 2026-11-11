@@ -24,6 +24,7 @@ import InsightsPage from "@/pages/insights";
 import MarketingPage from "@/pages/marketing";
 import MonitoringPage from "@/pages/monitoring";
 import BotsPage from "@/pages/bots";
+import DeliveriesPage from "@/pages/deliveries";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -72,6 +73,7 @@ function ProtectedApp() {
         <Route path="/chat">{() => <Guard component={ChatPage} permission="canViewChats" />}</Route>
         <Route path="/customers">{() => <Guard component={CustomersPage} permission="canManageCustomers" />}</Route>
         <Route path="/reports">{() => <Guard component={ReportsPage} permission="canViewReports" />}</Route>
+        <Route path="/deliveries">{() => <Guard component={DeliveriesPage} permission="canManageCustomers" />}</Route>
         <Route path="/bots">{() => <Guard component={BotsPage} admin />}</Route>
         <Route path="/monitoring">{() => <Guard component={MonitoringPage} permission="canMonitorChats" />}</Route>
         <Route path="/insights">{() => <Guard component={InsightsPage} permission="canViewChats" />}</Route>

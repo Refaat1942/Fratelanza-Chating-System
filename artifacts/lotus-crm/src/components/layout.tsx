@@ -10,6 +10,7 @@ import {
   Megaphone,
   Radar,
   Bot,
+  Truck,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -119,6 +120,9 @@ function Shell({ children }: { children: React.ReactNode }) {
             )}
             {perms?.canManageCustomers !== false && (
               <NavLink href="/customers" icon={Users} label="Customers" active={isActive("/customers")} />
+            )}
+            {perms?.canManageCustomers !== false && (
+              <NavLink href="/deliveries" icon={Truck} label="Deliveries" active={isActive("/deliveries")} />
             )}
             {perms?.canMonitorChats && (
               <NavLink

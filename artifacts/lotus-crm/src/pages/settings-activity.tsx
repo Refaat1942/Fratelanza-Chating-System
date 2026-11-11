@@ -23,6 +23,8 @@ const FILTERS = [
   { v: "monitor", l: "Supervisor monitoring" },
   { v: "team", l: "Teams" },
   { v: "bot", l: "Bots" },
+  { v: "delivery", l: "Deliveries" },
+  { v: "driver", l: "Drivers" },
   { v: "customers", l: "Customer import / export / merge" },
   { v: "settings", l: "Settings" },
 ];
@@ -54,6 +56,9 @@ const LABELS: Record<string, string> = {
   "customers.exported": "Exported customers",
   "customers.imported": "Imported customers",
   "customers.merged": "Merged duplicate customers",
+  "delivery.updated": "Updated a delivery",
+  "driver.created": "Added driver",
+  "driver.updated": "Updated driver",
   "team.created": "Created team",
   "team.updated": "Updated team",
   "team.members_changed": "Changed team members",

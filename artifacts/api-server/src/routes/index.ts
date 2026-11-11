@@ -28,6 +28,7 @@ import mediaRouter from "./media";
 import templatesRouter from "./templates";
 import crmRouter from "./crm";
 import botsRouter from "./bots";
+import deliveriesRouter from "./deliveries";
 
 const router: IRouter = Router();
 
@@ -60,5 +61,6 @@ router.use(teamsRouter);
 router.use(mediaRouter);
 router.use(templatesRouter);
 router.use(botsRouter);
+router.use(deliveriesRouter);
 
 export default router;

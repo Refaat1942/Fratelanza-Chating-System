@@ -81,6 +81,7 @@ import { fillVariables } from "@/lib/speed";
 import { SpeedDialog } from "@/pages/settings-speed";
 import { AttachmentView } from "@/components/attachment-view";
 import { TemplateDialog } from "@/components/template-dialog";
+import { ChatDeliveries } from "@/components/chat-deliveries";
 import { WhisperPanel } from "@/components/whisper-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
@@ -1594,6 +1595,13 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
             </div>
 
             <Separator />
+
+            {customer && (
+              <>
+                <ChatDeliveries customer={customer as { id: number; name: string; address?: string | null }} conversationId={conversationId} />
+                <Separator />
+              </>
+            )}
 
             <div className="space-y-4">
               <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contact Info</h4>
