@@ -62,3 +62,16 @@ tick chats, *Add to list*; filter with *All lists*.
 Chats are sorted into topics from the customer's words (Settings → Chat Topics:
 English/Arabic keywords per topic). A topic chosen by hand is never changed.
 Ten default topics are created once on first start; edit or delete them freely.
+
+## Templates (send first / after 24 hours)
+
+1. Create and get templates approved in WhatsApp Manager → Message templates.
+2. Put the WhatsApp Business Account ID in `deploy/.env` as `WHATSAPP_BUSINESS_ACCOUNT_ID=` and restart (`docker compose up -d api`).
+3. Settings → WhatsApp Templates → **Sync from Meta** (read-only). Approved templates appear in every WhatsApp chat under **Template**.
+4. Optional: subscribe the webhook field `message_template_status_update` so approvals/rejections update live.
+
+Templates with image/video/document headers or dynamic link buttons are listed but can't be sent from the inbox yet.
+
+## Photos, voice notes and files from customers
+
+Inbound media is downloaded from Meta right after the message arrives (max 20 MB each) and stored in the database, so it is included in the normal backup. It appears inline in the chat: photos, a voice-note player, video, or a file link.

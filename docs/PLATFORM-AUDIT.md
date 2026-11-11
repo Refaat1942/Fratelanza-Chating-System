@@ -22,7 +22,29 @@ Nothing below is a UI-only placeholder unless it says so.
 | Last login | **Done** | `users.last_login_at`, shown in Users & Roles. |
 | Security fix | **Done** | Removed the socket handler that let any logged-in browser broadcast fake delivered/read ticks to everyone. Ticks now come only from the WhatsApp status webhook. `GET /users/:id/permissions` now reports the user's real role (it trusted a query parameter). |
 
-## Already in the system before this change
+## Phase 2: channels, teams, automation, CRM, deliveries
+
+| Feature | Status | Notes |
+|---|---|---|
+| Facebook Messenger | **Done — needs credentials** | Signed webhook `/api/webhooks/messenger` (verify token + app-secret signature, fail closed), customers by PSID, names from Meta, attachments, echoes from Business Suite, delivery/read receipts, replies via the Send API within 24h. Turns on when `MESSENGER_PAGE_ACCESS_TOKEN` is set. Public use needs Meta App Review (`pages_messaging`). Setup: `deploy/MESSENGER_INSTAGRAM_SETUP.md`. |
+| Instagram Direct | **Done — needs credentials** | Same as Messenger at `/api/webhooks/instagram` (Facebook-login Page token or Instagram-login `IG…` token). Needs `instagram_manage_messages` review. |
+| Channels screen | **Done** | Settings → Channels: configuration checklist (never shows secrets), callback URLs, webhook fields, live counters, read-only "Test connection". |
+| Teams / groups | **Done** | Leader (supervisor/admin) + members; topics route chats to a team; team queues (auto-assignment only within the team); transfer to a team from the inbox and Live Monitor; team filters. |
+| Speed messages | **Done** | Categories, `/shortcut` in the composer, visibility (everyone / team / personal), language tag, variables (`{{customer_name}}`, `{{first_name}}`, `{{agent_name}}`, `{{company}}`, `{{date}}`, `{{time}}`, `{{phone}}`, `{{order_number}}`), usage counts. |
+| WhatsApp templates | **Done — needs `WHATSAPP_BUSINESS_ACCOUNT_ID`** | Read-only sync, approval status (sync + webhook), send from a chat with placeholders and preview (works after 24h), analytics (sent / delivered / read / failed / replied ≤24h). Media-header and dynamic-link templates are listed but not sendable yet. |
+| Inbound media | **Done** | Photos, voice notes, video, documents, stickers (WhatsApp) and Messenger/Instagram attachments downloaded (≤20 MB), stored in the database, shown inline; served by unguessable key with `nosniff` and a sandbox CSP. |
+| CRM | **Done** | Email + custom fields, CSV import (≤5,000 rows, never blanks data) / export (Excel-friendly, formula-safe), duplicate finder + merge, segments (new / returning / inactive / blocked), channel filter, activity timeline. |
+| Bots & automation | **Done** | Menu / survey / action bots with welcome, menus, questions saved to the customer, routing to team / topic / tag, handover or close, fallbacks, opening hours, new-chat or keyword trigger; "agent" / "موظف" always reaches a person. Off by default; never runs while sending is off; steps back once an agent has the chat. Visual editor, "Test bot" simulator, stats. |
+| Drivers & deliveries | **Done (new module)** | No drivers module existed. Drivers (availability follows active orders, history), groups, orders linked to customer and chat with status history; each change notes the chat and can notify the customer. |
+| Scheduled messages | **Done (existing)** | Campaign scheduling. |
+| Feed bot / subscription types / subscribers | **Not built** | Broadcasts are covered by Campaigns; opt-in subscriber lists are not built. |
+| Excel (.xlsx) export | **Partial** | CSV exports open in Excel; no native .xlsx. |
+| Arabic interface / full RTL | **Not built** | Message text and Arabic fields are RTL-aware; the interface has no translation layer yet. Largest remaining item. |
+| Stores / locations screen | **Not built** | Customers keep a branch; no store management. |
+| Full-text search across all messages | **Partial** | Inbox search covers name, phone and loaded messages. |
+| Very large inboxes | **Partial** | Indexes added; the conversation list still loads in one request. |
+
+## Before Phase 1 (unchanged, still working)
 
 | Area | Status | Notes |
 |---|---|---|
@@ -32,28 +54,13 @@ Nothing below is a UI-only placeholder unless it says so.
 | Sorting | **Partial** | Latest activity + grouping; no explicit oldest/priority sort selector. |
 | Assignment, auto-assign, per-user limits, queue | **Done** | Supervisors can now also reassign. |
 | Internal notes | **Done** | |
-| Quick replies | **Partial** | Title + body; no categories, team visibility or variables yet. |
-| Attachments | **Partial** | Agents can attach images/PDF (≤400 KB). Inbound WhatsApp media is shown as a label (e.g. "[Image]") — media download is not implemented. |
+| Attachments | **Done** | Agents attach images/PDF (≤400 KB); inbound media is shown inline (Phase 2). |
 | Chat Reasons (topics), categories, Not-Ready reasons, tags | **Done** | |
-| Customers / Mini CRM | **Partial** | Profiles, notes, tags, block, conversation history, AI brief. Missing: custom fields, import/export, duplicate detection, segments, timeline. |
+| Customers / Mini CRM | **Done** | Profiles, notes, tags, block, history, AI brief; Phase 2 adds the rest (below). |
 | Reports & dashboard | **Partial** | Real-data reports with CSV export (overview, volume, response times, customers, branches, tags, heatmap, agent performance). Missing: Excel export, team dimension. |
-| Campaigns | **Partial** | Broadcasts exist; approved WhatsApp template sending/status sync is not implemented. |
+| Campaigns | **Done** | Broadcasts and scheduling; template sending is now available per chat (Phase 2). |
 | Users, roles, permissions, deactivate, reset links, forced password change | **Done** | |
 | Branding, PWA, responsive layout | **Done** | |
-
-## Not built yet (recommended order)
-
-1. **Teams/groups** — `teams` table, agent ↔ team, team leaders scoped to their team, team filters in inbox/monitor/reports.
-2. **Speed messages v2** — categories, team/user visibility, `{{customer_name}}`-style variables (extend `quick_replies`).
-3. **WhatsApp templates** — sync approved templates from Meta, send outside 24h, status tracking, usage analytics. *Needs the existing Meta credentials; read-only sync is safe.*
-4. **Inbound media** — download WhatsApp media to storage and show images/voice/PDF inline.
-5. **CRM v2** — custom fields, CSV import/export, duplicate detection (by normalised phone), segments, activity timeline.
-6. **Reports v2** — Excel export, team dimension, Hanging/Last-client/Unassigned report exports (the live views already exist in Live Monitor).
-7. **Facebook Messenger & Instagram DM** — *Needs credentials* (Page access token, app review for `pages_messaging` / `instagram_manage_messages`). A secret-protected generic intake (`POST /webhooks/messenger|instagram`) exists, but it is not Meta's signed Messenger/IG webhook and there is no outbound send.
-8. **Bots & automation** (welcome menus, surveys, routing, hand-over) — not present; needs a flow model and engine.
-9. **Drivers & delivery** — no drivers module exists in this codebase; it would be a new module.
-10. **Arabic UI / full RTL** — message text is already bidi-safe, but the interface has no translation layer yet.
-11. **Channels / Platforms / Stores screens** — only the WhatsApp diagnostics page exists today.
 
 ## Database changes in Phase 1 (additive only)
 
@@ -75,3 +82,31 @@ Nothing below is a UI-only placeholder unless it says so.
 | `GET /api/audit-logs?action=&before=&limit=` | admins |
 
 Changed (backward compatible): conversation responses include `takeoverFromAgentId`/`takeoverAt`; user responses include `lastLoginAt`; `/api/role-permissions` always lists admin, supervisor, agent; `/api/users/workload` is open to supervisors; `PUT /api/settings` accepts `hangingHours`.
+
+## Database changes in Phase 2 (additive only)
+
+- New tables: `teams`, `quick_reply_categories`, `whatsapp_templates`, `media_files`, `customer_fields`, `bots`, `bot_sessions`, `driver_groups`, `drivers`, `delivery_orders`, `delivery_events`.
+- New nullable/defaulted columns: `customers.messenger_psid`, `customers.instagram_id` (unique, nullable), `customers.email`, `customers.custom_fields`, `users.team_id`, `conversations.team_id`, `chat_reasons.team_id`, `quick_replies.category_id|shortcut|visibility (default 'all')|team_id|owner_id|language|usage_count|last_used_at`, `messages.template_id`, `messages.is_bot` (default false).
+- New indexes on conversations (customer, agent, last message) and messages (conversation, id).
+- Nothing is dropped, renamed or rewritten; existing quick replies stay visible to everyone.
+
+## New API endpoints (Phase 2)
+
+| Area | Endpoints |
+|---|---|
+| Messenger / Instagram | `GET/POST /api/webhooks/messenger`, `GET/POST /api/webhooks/instagram`; `GET /api/channels/status[?check=1]` |
+| Teams | `GET/POST /api/teams`, `PUT/DELETE /api/teams/:id`, `PUT /api/teams/:id/members`; bulk action `team` |
+| Speed messages | `GET/POST /api/quick-replies`, `PUT/DELETE /api/quick-replies/:id`, `POST /api/quick-replies/:id/use`, `GET/POST/DELETE /api/quick-reply-categories` |
+| Templates | `GET /api/whatsapp/templates`, `POST /api/whatsapp/templates/sync`, `POST /api/conversations/:id/template`, `GET /api/whatsapp/templates/analytics` |
+| Media | `GET /api/media/:key` |
+| CRM | `GET/POST/DELETE /api/customer-fields`, `GET /api/customers/export.csv`, `POST /api/customers/import`, `GET /api/customers/duplicates`, `POST /api/customers/:id/merge`, `GET /api/customers/:id/timeline`, `GET /api/customers?segment=&channel=` |
+| Bots | `GET/POST /api/bots`, `GET/PUT/DELETE /api/bots/:id`, `POST /api/bots/:id/active`, `POST /api/bots/simulate`, `GET /api/bots/:id/analytics` |
+| Deliveries | `GET/POST /api/driver-groups`, `DELETE /api/driver-groups/:id`, `GET/POST /api/drivers`, `PUT /api/drivers/:id`, `GET /api/drivers/:id/history`, `GET/POST /api/deliveries`, `GET/PATCH /api/deliveries/:id` |
+
+## New server settings (optional; empty = feature off)
+
+`WHATSAPP_BUSINESS_ACCOUNT_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `MESSENGER_PAGE_ACCESS_TOKEN`, `INSTAGRAM_ACCESS_TOKEN`, `INSTAGRAM_GRAPH_HOST`, `BOT_TIMEZONE` (default Africa/Cairo). Passed through `deploy/docker-compose.yml`, documented in `deploy/.env.example`.
+
+## Testing (Phase 2)
+
+Against Postgres with a mock Meta Graph server (no real Meta calls): 195 API checks in 8 suites (Phase 1 regression 56, Messenger/Instagram 21, teams 21, speed messages 14, templates + media 18, CRM 23, bots 22, deliveries 20), all passing on fresh databases. Typecheck and production build clean. Browser test: bot simulator, delivery creation, customer import, all new settings sections, `/shortcut` filling, chat deliveries panel — no page errors; no horizontal overflow at 390 px on Bots, Deliveries, Customers, Live Monitor, Settings and Inbox.

@@ -24,6 +24,7 @@ export const usersTable = pgTable("users", {
   notReadyReasonId: integer("not_ready_reason_id"),
   notReadySince: timestamp("not_ready_since"),
   lastLoginAt: timestamp("last_login_at"),
+  teamId: integer("team_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

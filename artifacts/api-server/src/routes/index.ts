@@ -22,6 +22,13 @@ import customerAiRouter from "./customer-ai";
 import userPermissionsRouter from "./user-permissions";
 import systemRouter from "./system";
 import supervisionRouter from "./supervision";
+import channelsRouter from "./channels";
+import teamsRouter from "./teams";
+import mediaRouter from "./media";
+import templatesRouter from "./templates";
+import crmRouter from "./crm";
+import botsRouter from "./bots";
+import deliveriesRouter from "./deliveries";
 
 const router: IRouter = Router();
 
@@ -31,6 +38,7 @@ router.use(webhooksRouter);
 router.use(authRouter);
 router.use(userPermissionsRouter);
 router.use(usersRouter);
+router.use(crmRouter);
 router.use(customersRouter);
 router.use(customerAiRouter);
 router.use(conversationsRouter);
@@ -48,5 +56,11 @@ router.use(chatReasonsRouter);
 router.use(notReadyReasonsRouter);
 router.use(meRouter);
 router.use(supervisionRouter);
+router.use(channelsRouter);
+router.use(teamsRouter);
+router.use(mediaRouter);
+router.use(templatesRouter);
+router.use(botsRouter);
+router.use(deliveriesRouter);
 
 export default router;

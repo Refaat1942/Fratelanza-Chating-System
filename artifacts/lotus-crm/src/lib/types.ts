@@ -6,6 +6,7 @@ export interface AppUser extends User {
   isActive?: boolean;
   mustChangePassword?: boolean;
   maxChats?: number | null;
+  teamId?: number | null;
   lastLoginAt?: string | null;
 }
 

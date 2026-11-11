@@ -4,11 +4,14 @@ import { customersTable, conversationsTable } from "@workspace/db";
 import { eq, ilike, sql, and, or, SQL } from "drizzle-orm";
 import { requireAuth } from "../middlewares/auth";
 import { requirePermission } from "../middlewares/permissions";
+import { cleanCustomFields } from "./crm";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const router = Router();
 
 router.get("/customers", requireAuth, async (req, res) => {
-  const { search, tag, branch } = req.query as Record<string, string>;
+  const { search, tag, branch, segment, channel } = req.query as Record<string, string>;
 
   const conditions: SQL[] = [];
   if (search) {
@@ -22,22 +25,39 @@ router.get("/customers", requireAuth, async (req, res) => {
     const combined = or(
       ilike(customersTable.name, like),
       ilike(customersTable.phone, like),
+      ilike(customersTable.email, like),
       tagMatch,
     );
     if (combined) conditions.push(combined);
   }
   if (branch) conditions.push(eq(customersTable.branch, branch));
   if (tag) conditions.push(sql`${customersTable.tags} @> ARRAY[${tag}]::text[]`);
+  // Segments (all computed from real data).
+  const convCount = sql`(SELECT COUNT(*) FROM conversations v WHERE v.customer_id = ${customersTable.id})`;
+  const lastAct = sql`(SELECT MAX(v.last_message_at) FROM conversations v WHERE v.customer_id = ${customersTable.id})`;
+  if (segment === "new") conditions.push(sql`${customersTable.createdAt} > NOW() - INTERVAL '30 days'`);
+  if (segment === "returning") conditions.push(sql`${convCount} >= 2`);
+  if (segment === "inactive") conditions.push(sql`COALESCE(${lastAct}, ${customersTable.createdAt}) < NOW() - INTERVAL '60 days'`);
+  if (segment === "blocked") conditions.push(eq(customersTable.isBlocked, true));
+  if (channel && ["whatsapp", "messenger", "instagram", "sms", "web"].includes(channel)) {
+    conditions.push(sql`EXISTS (SELECT 1 FROM conversations v WHERE v.customer_id = ${customersTable.id} AND v.channel = ${channel})`);
+  }
 
-  const customers = await db.select().from(customersTable)
+  const customers = await db.select({
+    customer: customersTable,
+    conversationCount: sql<number>`${convCount}::int`,
+    lastActivity: lastAct,
+  }).from(customersTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(customersTable.createdAt);
+    .orderBy(customersTable.createdAt)
+    .then((rows) => rows.map((r) => ({ ...r.customer, conversationCount: r.conversationCount, lastActivity: r.lastActivity })));
 
   res.json(customers);
 });
 
 router.post("/customers", requireAuth, requirePermission("canManageCustomers"), async (req, res) => {
-  const { name, phone, branch, address, tags, notes, prescriptionNotes } = req.body;
+  const { name, phone, branch, address, tags, notes, prescriptionNotes, email, customFields } = req.body;
+  if (email && !EMAIL_RE.test(String(email).trim())) { res.status(400).json({ error: "Enter a valid email address" }); return; }
   // Stronger validation — names need to be non-empty, phones need to look
   // like a phone (7+ digits, allow + - space ()). Prevents junk records.
   const nameStr = typeof name === "string" ? name.trim() : "";
@@ -63,6 +83,8 @@ router.post("/customers", requireAuth, requirePermission("canManageCustomers"), 
     tags: Array.isArray(tags) ? tags : [],
     notes: notes || null,
     prescriptionNotes: prescriptionNotes || null,
+    email: email ? String(email).trim().toLowerCase() : null,
+    customFields: customFields ? await cleanCustomFields(customFields) : null,
   }).returning();
   res.status(201).json(customer);
 });
@@ -76,8 +98,14 @@ router.get("/customers/:id", requireAuth, async (req, res) => {
 
 router.put("/customers/:id", requireAuth, requirePermission("canManageCustomers"), async (req, res) => {
   const id = Number(req.params.id);
-  const { name, phone, branch, address, tags, notes, prescriptionNotes } = req.body;
+  const { name, phone, branch, address, tags, notes, prescriptionNotes, email, customFields } = req.body;
   const updates: Record<string, unknown> = {};
+  if (email !== undefined) {
+    const e = String(email ?? "").trim().toLowerCase();
+    if (e && !EMAIL_RE.test(e)) { res.status(400).json({ error: "Enter a valid email address" }); return; }
+    updates.email = e || null;
+  }
+  if (customFields !== undefined) updates.customFields = await cleanCustomFields(customFields);
   if (name !== undefined) updates.name = name;
   if (phone !== undefined) updates.phone = phone;
   if (branch !== undefined) updates.branch = branch;

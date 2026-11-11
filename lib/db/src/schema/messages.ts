@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   uniqueIndex,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -32,9 +33,13 @@ export const messagesTable = pgTable(
     // Provider message id (WhatsApp "wamid.…"). Used to de-duplicate Meta's
     // webhook retries and to match delivery/read status callbacks.
     externalId: text("external_id"),
+    // Sent from an approved WhatsApp template (for template analytics).
+    templateId: integer("template_id"),
+    // Written by a chat bot (customer-facing, no human sender).
+    isBot: boolean("is_bot").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("messages_external_id_uniq").on(t.externalId)],
+  (t) => [uniqueIndex("messages_external_id_uniq").on(t.externalId), index("messages_conversation_idx").on(t.conversationId, t.id)],
 );
 
 export const insertMessageSchema = createInsertSchema(messagesTable).omit({

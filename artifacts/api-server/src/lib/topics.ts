@@ -8,7 +8,7 @@
  * never overridden; one picked by the classifier (`chat_reason_auto`) is
  * re-evaluated whenever the customer writes again or the keywords change.
  */
-import { and, desc, eq, or, isNull } from "drizzle-orm";
+import { and, desc, eq, or, isNull, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { chatReasonsTable, conversationsTable, messagesTable, settingsTable } from "@workspace/db";
 import { logger } from "./logger";
@@ -197,3 +197,17 @@ export async function bootTopics(): Promise<void> {
   }
 }
 
+
+/**
+ * Team routing: an unassigned chat whose topic belongs to a team is handed to
+ * that team's queue (auto-assignment then picks only that team's agents).
+ * Never moves a chat that already has an agent or a team.
+ */
+export async function routeByTopic(conversationId: number): Promise<void> {
+  await db.execute(sql`
+    UPDATE conversations c SET team_id = cr.team_id
+    FROM chat_reasons cr
+    WHERE c.id = ${conversationId} AND c.assigned_agent_id IS NULL AND c.team_id IS NULL
+      AND cr.id = c.chat_reason_id AND cr.team_id IS NOT NULL
+  `);
+}

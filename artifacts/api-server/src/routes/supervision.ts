@@ -257,6 +257,7 @@ router.get("/monitoring", requireAuth, requirePermission("canMonitorChats"), asy
   const view = (VIEWS as readonly string[]).includes(String(req.query["view"])) ? (req.query["view"] as View) : "active";
   const agentId = Number(req.query["agentId"]);
   const channel = typeof req.query["channel"] === "string" ? req.query["channel"] : "";
+  const teamId = Number(req.query["teamId"]);
   const s = await getSettings();
   const sla = Math.max(1, s.slaMinutes ?? 15);
   const hanging = Math.max(1, (s as { hangingHours?: number }).hangingHours ?? 24);
@@ -275,6 +276,8 @@ router.get("/monitoring", requireAuth, requirePermission("canMonitorChats"), asy
   const filters = [viewCond[view]];
   if (Number.isInteger(agentId) && agentId > 0) filters.push(sql`c.assigned_agent_id = ${agentId}`);
   if (channel) filters.push(sql`c.channel = ${channel}`);
+  // Team: chats routed to the team, or handled by one of its members.
+  if (Number.isInteger(teamId) && teamId > 0) filters.push(sql`(c.team_id = ${teamId} OR u.team_id = ${teamId})`);
   const where = sql.join(filters, sql` AND `);
   const order =
     view === "active" ? sql`c.last_message_at DESC NULLS LAST`
@@ -286,6 +289,7 @@ router.get("/monitoring", requireAuth, requirePermission("canMonitorChats"), asy
            LEFT(c.last_message, 140) AS last_message, c.unread_count, c.queued_at,
            c.assigned_agent_id, COALESCE(u.display_name, u.name) AS agent_name, u.status AS agent_status,
            c.takeover_from_agent_id, COALESCE(tu.display_name, tu.name) AS takeover_from_name, c.takeover_at,
+           c.team_id, t.name AS team_name,
            cu.id AS customer_id, cu.name AS customer_name, cu.phone AS customer_phone,
            ${waitingExpr}::int AS waiting_minutes,
            (EXTRACT(EPOCH FROM (NOW() - c.created_at)) / 60)::int AS age_minutes
@@ -293,6 +297,7 @@ router.get("/monitoring", requireAuth, requirePermission("canMonitorChats"), asy
     JOIN customers cu ON cu.id = c.customer_id
     LEFT JOIN users u ON u.id = c.assigned_agent_id
     LEFT JOIN users tu ON tu.id = c.takeover_from_agent_id
+    LEFT JOIN teams t ON t.id = c.team_id
     WHERE ${where}
     ORDER BY ${order}
     LIMIT 500
@@ -307,15 +312,18 @@ router.get("/monitoring", requireAuth, requirePermission("canMonitorChats"), asy
       COUNT(*) FILTER (WHERE ${viewCond.long_waiting})::int AS long_waiting,
       COUNT(*) FILTER (WHERE ${viewCond.sla})::int AS sla
     FROM conversations c
+    LEFT JOIN users u ON u.id = c.assigned_agent_id
+    ${Number.isInteger(teamId) && teamId > 0 ? sql`WHERE (c.team_id = ${teamId} OR u.team_id = ${teamId})` : sql``}
   `);
 
   const agents = await db.execute(sql`
-    SELECT u.id, COALESCE(u.display_name, u.name) AS name, u.role, u.status, u.last_login_at,
+    SELECT u.id, COALESCE(u.display_name, u.name) AS name, u.role, u.status, u.last_login_at, u.team_id,
            COUNT(c.id) FILTER (WHERE c.status IN ('open','pending'))::int AS open_chats,
            COUNT(c.id) FILTER (WHERE c.status <> 'completed' AND c.last_sender_type = 'customer')::int AS awaiting_reply
     FROM users u
     LEFT JOIN conversations c ON c.assigned_agent_id = u.id
     WHERE u.is_active AND u.role IN ('agent','supervisor')
+      ${Number.isInteger(teamId) && teamId > 0 ? sql`AND u.team_id = ${teamId}` : sql``}
     GROUP BY u.id
     ORDER BY u.status = 'available' DESC, open_chats DESC, name
   `);

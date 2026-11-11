@@ -23,6 +23,7 @@ const publicUserCols = {
   mustChangePassword: usersTable.mustChangePassword,
   maxChats: usersTable.maxChats,
   lastLoginAt: usersTable.lastLoginAt,
+  teamId: usersTable.teamId,
   createdAt: usersTable.createdAt,
 } as const;
 
@@ -88,7 +89,7 @@ router.get("/users", requireAuth, async (req: AuthRequest, res) => {
 });
 
 router.post("/users", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
-  const { name, displayName, email, password, role, maxChats } = req.body ?? {};
+  const { name, displayName, email, password, role, maxChats, teamId } = req.body ?? {};
   const cap = parseMaxChats(maxChats);
   if (cap === "invalid") { res.status(400).json({ error: "Max chats must be between 1 and 200 (or empty for the default)" }); return; }
   if (typeof name !== "string" || !name.trim() || typeof email !== "string" || !email.trim()) {
@@ -124,6 +125,7 @@ router.post("/users", requireAuth, requireAdmin, async (req: AuthRequest, res) =
       // An admin-chosen password is temporary: the user picks their own at first login.
       mustChangePassword: true,
       maxChats: cap ?? null,
+      teamId: Number.isInteger(teamId) ? teamId : null,
     })
     .returning(publicUserCols);
   void logAudit({ actorId: req.user?.id, action: "user.created", entityType: "user", entityId: user.id, details: { email: cleanEmail, role } });
@@ -166,7 +168,7 @@ router.get("/users/:id", requireAuth, async (req, res) => {
 router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-  const { name, displayName, email, role, password, maxChats } = req.body ?? {};
+  const { name, displayName, email, role, password, maxChats, teamId } = req.body ?? {};
   const cap = parseMaxChats(maxChats);
   if (cap === "invalid") { res.status(400).json({ error: "Max chats must be between 1 and 200 (or empty for the default)" }); return; }
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, id));
@@ -204,6 +206,10 @@ router.put("/users/:id", requireAuth, requireAdmin, async (req: AuthRequest, res
     updates.role = role;
   }
   if (cap !== undefined) updates.maxChats = cap;
+  if (teamId !== undefined) {
+    if (teamId !== null && !Number.isInteger(teamId)) { res.status(400).json({ error: "teamId must be a team id or null" }); return; }
+    updates.teamId = teamId;
+  }
   if (password) {
     const bad = validatePassword(password);
     if (bad) { res.status(400).json({ error: bad }); return; }

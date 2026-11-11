@@ -9,8 +9,11 @@ import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import type { Server as IOServer } from "socket.io";
 import { logger } from "../lib/logger";
 import { tryAutoAssign } from "../lib/assignment";
-import { classifyConversation } from "../lib/topics";
+import { classifyConversation, routeByTopic } from "../lib/topics";
 import { recordWebhookEvent } from "../lib/webhook-stats";
+import { attachMedia, downloadUrl, downloadWhatsAppMedia } from "../lib/media";
+import { applyTemplateStatus } from "../lib/wa-templates";
+import { runBotOnInbound } from "../lib/bot-runtime";
 import {
   digitsOnly,
   parseWhatsAppWebhook,
@@ -21,6 +24,14 @@ import {
   verifyMetaSignature,
   whatsappConfig,
 } from "../lib/whatsapp";
+import {
+  parseSocialWebhook,
+  socialConfig,
+  fetchSocialProfileName,
+  type SocialChannel,
+  type SocialInbound,
+  type SocialReceipt,
+} from "../lib/meta-social";
 
 const router = Router();
 
@@ -33,6 +44,7 @@ interface InboundPayload {
   message?: string;
   body?: string;
   externalId?: string;
+  attachments?: string[];
 }
 
 function getIo(req: Request): IOServer | undefined {
@@ -162,6 +174,8 @@ async function ingestInbound(
   provider: Provider,
   payload: InboundPayload,
   io?: IOServer,
+  /** Already-resolved customer (Messenger/Instagram have no phone number). */
+  knownCustomer?: typeof customersTable.$inferSelect,
 ): Promise<{
   customerId: number;
   conversationId: number;
@@ -171,7 +185,7 @@ async function ingestInbound(
   const rawPhone = String(payload.phone ?? payload.from ?? "").trim();
   const digits = digitsOnly(rawPhone);
   const body = String(payload.message ?? payload.body ?? "").trim();
-  if (!digits || !body) {
+  if ((!digits && !knownCustomer) || !body) {
     throw new Error("phone/from and message/body are required");
   }
   const externalId = payload.externalId?.trim() || null;
@@ -200,7 +214,7 @@ async function ingestInbound(
     }
   }
 
-  const customer = await findOrCreateCustomer(digits, payload.name);
+  const customer = knownCustomer ?? (await findOrCreateCustomer(digits, payload.name));
 
   // Active = open OR pending. (Pending = waiting on customer / queued.) Using
   // only "open" here would spawn a fresh conversation on every reply that
@@ -242,6 +256,7 @@ async function ingestInbound(
       conversationId: conv.id,
       senderType: "customer",
       body,
+      attachments: payload.attachments ?? [],
       status: "delivered",
       externalId,
     })
@@ -277,8 +292,12 @@ async function ingestInbound(
     logger.error({ err, conversationId: conv.id }, "Topic classification failed");
   }
 
-  if (!conv.assignedAgentId) {
+  // A chat bot may answer first; while it keeps the chat, nobody is assigned.
+  const botKeeps = await runBotOnInbound({ conversationId: conv.id, text: body, isNewConversation, io });
+
+  if (!conv.assignedAgentId && !botKeeps) {
     try {
+      await routeByTopic(conv.id);
       await tryAutoAssign(conv.id, io);
     } catch (err) {
       logger.error({ err, conversationId: conv.id }, "Auto-assign failed");
@@ -348,6 +367,15 @@ router.post("/webhooks/whatsapp", async (req, res) => {
     for (const c of e.changes ?? []) if (c.field) fields.add(c.field);
   }
   for (const f of fields) recordWebhookEvent(`field:${f}`);
+  // Template approval / rejection updates (field "message_template_status_update").
+  for (const e of (req.body?.entry ?? []) as { changes?: { field?: string; value?: Record<string, unknown> }[] }[]) {
+    for (const c of e.changes ?? []) {
+      if (c.field === "message_template_status_update" && c.value) {
+        try { await applyTemplateStatus(c.value as Parameters<typeof applyTemplateStatus>[0]); }
+        catch (err) { logger.error({ err }, "Template status update failed"); }
+      }
+    }
+  }
   recordWebhookEvent("customer_message", messages.length);
   recordWebhookEvent("status_update", statuses.length);
   recordWebhookEvent("phone_app_reply", sync.echoes.length);
@@ -378,11 +406,18 @@ router.post("/webhooks/whatsapp", async (req, res) => {
 
   for (const m of messages) {
     try {
-      await ingestInbound(
+      const result = await ingestInbound(
         "whatsapp",
         { from: m.from, name: m.name, body: m.body, externalId: m.externalId },
         io,
       );
+      if (m.media && !result.duplicate && result.messageId) {
+        const media = m.media;
+        // After the 200 below: a slow download must never make Meta retry.
+        setImmediate(() => void attachMedia(result.messageId, () => downloadWhatsAppMedia(media.id), {
+          filename: media.filename, source: "whatsapp", io, conversationId: result.conversationId,
+        }));
+      }
     } catch (err) {
       logger.error({ err, externalId: m.externalId }, "WhatsApp inbound failed");
     }
@@ -415,9 +450,150 @@ router.post("/webhooks/whatsapp", async (req, res) => {
   res.sendStatus(200);
 });
 
+/* ------------------- Facebook Messenger & Instagram (Meta) ---------------- */
+
+/** Find a Messenger/Instagram customer by their page-scoped id, or create one. */
+async function findOrCreateSocialCustomer(channel: SocialChannel, userId: string) {
+  const col = channel === "messenger" ? customersTable.messengerPsid : customersTable.instagramId;
+  const [existing] = await db.select().from(customersTable).where(eq(col, userId)).limit(1);
+  if (existing) return existing;
+  const name = (await fetchSocialProfileName(channel, userId)) ?? `${channel === "messenger" ? "Messenger" : "Instagram"} user ${userId.slice(-4)}`;
+  const [created] = await db
+    .insert(customersTable)
+    .values({
+      name,
+      phone: "",
+      tags: ["New"],
+      ...(channel === "messenger" ? { messengerPsid: userId } : { instagramId: userId }),
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (created) return created;
+  // Lost a race with a parallel delivery for the same person.
+  const [again] = await db.select().from(customersTable).where(eq(col, userId)).limit(1);
+  return again!;
+}
+
+/** A message the business sent from Meta's own inbox (Business Suite / the app). */
+async function importSocialEcho(m: SocialInbound, io?: IOServer): Promise<void> {
+  const customer = await findOrCreateSocialCustomer(m.channel, m.customerId);
+  let [conv] = await db
+    .select()
+    .from(conversationsTable)
+    .where(and(eq(conversationsTable.customerId, customer.id), eq(conversationsTable.channel, m.channel)))
+    .orderBy(desc(conversationsTable.createdAt))
+    .limit(1);
+  if (!conv) {
+    [conv] = await db
+      .insert(conversationsTable)
+      .values({ customerId: customer.id, channel: m.channel, status: "pending", lastMessage: m.body, lastMessageAt: m.timestamp, lastSenderType: "agent" })
+      .returning();
+  }
+  // Messages we sent through the API already carry this id — skipped here.
+  const inserted = await db
+    .insert(messagesTable)
+    .values({ conversationId: conv.id, senderType: "agent", body: m.body, attachments: m.attachments, status: "sent", externalId: m.externalId, createdAt: m.timestamp })
+    .onConflictDoNothing({ target: messagesTable.externalId })
+    .returning();
+  if (!inserted.length) return;
+  await db
+    .update(conversationsTable)
+    .set({ lastMessage: m.body, lastMessageAt: m.timestamp, lastSenderType: "agent", unreadCount: 0, ...(conv.status === "open" ? { status: "pending" as const } : {}) })
+    .where(eq(conversationsTable.id, conv.id));
+  io?.to(`conv:${conv.id}`).emit("new_message", inserted[0]);
+  io?.emit("conversation_updated", { conversationId: conv.id });
+}
+
+/** Delivery/read receipts: everything we sent up to the watermark. */
+async function applySocialReceipt(r: SocialReceipt, io?: IOServer): Promise<void> {
+  const col = r.channel === "messenger" ? customersTable.messengerPsid : customersTable.instagramId;
+  const [cust] = await db.select({ id: customersTable.id }).from(customersTable).where(eq(col, r.customerId)).limit(1);
+  if (!cust) return;
+  const next = r.kind === "read" ? "read" : "delivered";
+  const allowed = r.kind === "read" ? sql`m.status IN ('sent','delivered')` : sql`m.status = 'sent'`;
+  const updated = await db.execute(sql`
+    UPDATE messages m SET status = ${next}
+    FROM conversations c
+    WHERE m.conversation_id = c.id AND c.customer_id = ${cust.id} AND c.channel = ${r.channel}
+      AND m.sender_type = 'agent' AND m.is_note = false AND m.external_id IS NOT NULL
+      AND m.created_at <= ${r.watermark} AND ${allowed}
+    RETURNING m.id
+  `);
+  for (const row of (updated.rows ?? []) as { id: number }[]) io?.emit("message_status", { messageId: row.id, status: next });
+}
+
+function verifySocialHandshake(req: Request, res: import("express").Response, label: string): void {
+  const { verifyToken } = socialConfig();
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (verifyToken && mode === "subscribe" && typeof token === "string" && typeof challenge === "string" && safeEqual(token, verifyToken)) {
+    res.status(200).type("text/plain").send(challenge);
+    return;
+  }
+  logger.warn(`${label} webhook verification rejected`);
+  res.sendStatus(403);
+}
+
+router.get("/webhooks/messenger", (req, res) => verifySocialHandshake(req, res, "Messenger"));
+router.get("/webhooks/instagram", (req, res) => verifySocialHandshake(req, res, "Instagram"));
+
+/** Meta-signed Messenger / Instagram delivery. Returns true when handled. */
+async function handleSignedSocial(req: Request, res: import("express").Response): Promise<void> {
+  const { appSecret } = socialConfig();
+  if (!appSecret) {
+    logger.error("META_APP_SECRET / WHATSAPP_APP_SECRET is not set — rejecting Messenger/Instagram webhook");
+    res.sendStatus(503);
+    return;
+  }
+  const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody;
+  if (!verifyMetaSignature(rawBody, req.header("x-hub-signature-256"), appSecret)) {
+    logger.warn("Messenger/Instagram webhook signature mismatch");
+    res.sendStatus(401);
+    return;
+  }
+  const io = getIo(req);
+  const { channel, messages, receipts } = parseSocialWebhook(req.body);
+  if (!channel) { res.sendStatus(200); return; }
+  recordWebhookEvent(`${channel}:webhook`);
+  recordWebhookEvent(`${channel}:customer_message`, messages.filter((m) => m.direction === "in").length);
+  recordWebhookEvent(`${channel}:echo`, messages.filter((m) => m.direction === "out").length);
+  recordWebhookEvent(`${channel}:receipt`, receipts.length);
+  logger.info({ channel, messages: messages.length, receipts: receipts.length }, "Meta social webhook received");
+
+  for (const m of messages) {
+    try {
+      if (m.direction === "out") { await importSocialEcho(m, io); continue; }
+      const customer = await findOrCreateSocialCustomer(m.channel, m.customerId);
+      const result = await ingestInbound(m.channel, { body: m.body, externalId: m.externalId, attachments: m.attachments }, io, customer);
+      // Meta CDN links expire: keep our own copy.
+      if (!result.duplicate && result.messageId) {
+        for (const url of m.attachments) {
+          setImmediate(() => void attachMedia(result.messageId, () => downloadUrl(url), {
+            source: m.channel, replaceUrl: url, io, conversationId: result.conversationId,
+          }));
+        }
+      }
+    } catch (err) {
+      logger.error({ err, externalId: m.externalId, channel }, "Messenger/Instagram inbound failed");
+    }
+  }
+  for (const r of receipts) {
+    try { await applySocialReceipt(r, io); }
+    catch (err) { logger.error({ err, channel }, "Messenger/Instagram receipt failed"); }
+  }
+  res.sendStatus(200);
+}
+
 /* ---------------------- Generic JSON hook (Messenger etc.) ---------------- */
 
 router.post("/webhooks/:provider", async (req, res) => {
+  // Meta's own signed deliveries for Messenger / Instagram.
+  if ((req.params.provider === "messenger" || req.params.provider === "instagram") && req.header("x-hub-signature-256")) {
+    await handleSignedSocial(req, res);
+    return;
+  }
+
   const secret = process.env.WEBHOOK_SECRET;
   const supplied = req.header("x-webhook-secret");
   if (!secret || !supplied || !safeEqual(supplied, secret)) {

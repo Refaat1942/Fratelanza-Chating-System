@@ -21,6 +21,11 @@ const FILTERS = [
   { v: "conversation", l: "Assignments & takeovers" },
   { v: "whisper", l: "Whispers" },
   { v: "monitor", l: "Supervisor monitoring" },
+  { v: "team", l: "Teams" },
+  { v: "bot", l: "Bots" },
+  { v: "delivery", l: "Deliveries" },
+  { v: "driver", l: "Drivers" },
+  { v: "customers", l: "Customer import / export / merge" },
   { v: "settings", l: "Settings" },
 ];
 
@@ -42,6 +47,23 @@ const LABELS: Record<string, string> = {
   "whisper.sent": "Sent a whisper",
   "monitor.open": "Opened an agent's chat (monitoring)",
   "settings.updated": "Changed settings",
+  "templates.synced": "Synced WhatsApp templates",
+  "bot.created": "Created bot",
+  "bot.updated": "Updated bot",
+  "bot.activated": "Switched a bot on",
+  "bot.deactivated": "Switched a bot off",
+  "bot.deleted": "Deleted bot",
+  "customers.exported": "Exported customers",
+  "customers.imported": "Imported customers",
+  "customers.merged": "Merged duplicate customers",
+  "delivery.updated": "Updated a delivery",
+  "driver.created": "Added driver",
+  "driver.updated": "Updated driver",
+  "team.created": "Created team",
+  "team.updated": "Updated team",
+  "team.members_changed": "Changed team members",
+  "team.deleted": "Deleted team",
+  "conversation.team_transferred": "Transferred chats to a team",
 };
 
 function describe(r: AuditLogRow): string {

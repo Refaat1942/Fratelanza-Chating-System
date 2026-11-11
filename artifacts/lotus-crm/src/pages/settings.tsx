@@ -2,9 +2,8 @@ import React from "react";
 import { 
   useListUsers, useCreateUser, useDeleteUser, useUpdateUser,
   useListTags, useCreateTag, useDeleteTag,
-  useListQuickReplies, useCreateQuickReply, useDeleteQuickReply,
   useGetSettings, useUpdateSettings,
-  getListUsersQueryKey, getListTagsQueryKey, getListQuickRepliesQueryKey,
+  getListUsersQueryKey, getListTagsQueryKey,
   getGetSettingsQueryKey
 } from "@workspace/api-client-react";
 import {
@@ -16,7 +15,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format, parseISO } from "date-fns";
-import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History } from "lucide-react";
+import { Trash2, Plus, Shield, Users, Tag as TagIcon, MessageSquare, Sliders, Palette, Upload, X, Lock, MessageCircle, FolderOpen, Coffee, History, Radio, UsersRound, FileText, ListPlus } from "lucide-react";
 import {
   useRolePermissions, useUpdateRolePermissions, type RolePermissions as RolePerms, type RoleName,
   useChatReasons, useCreateChatReason, useUpdateChatReason, useDeleteChatReason,
@@ -51,6 +50,11 @@ import { BrandingSettings } from "@/pages/settings-branding";
 import { TopicsSettings } from "@/pages/settings-topics";
 import { WhatsAppSettings } from "@/pages/settings-whatsapp";
 import { ActivityLogSettings } from "@/pages/settings-activity";
+import { ChannelsSettings } from "@/pages/settings-channels";
+import { TeamsSettings } from "@/pages/settings-teams";
+import { SpeedMessagesSettings } from "@/pages/settings-speed";
+import { TemplatesSettings } from "@/pages/settings-templates";
+import { CustomerFieldsSettings } from "@/components/crm-extras";
 import { Smartphone } from "lucide-react";
 
 type SettingsSection = {
@@ -63,19 +67,23 @@ type SettingsSection = {
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { value: "users",                   group: "Team",          label: "Users & Roles",       icon: Users,         Component: UsersSettings },
+  { value: "teams",                   group: "Team",          label: "Teams",               icon: UsersRound,    Component: TeamsSettings },
   { value: "permissions",             group: "Team",          label: "Permissions",         icon: Lock,          Component: PermissionsSettings },
   { value: "tags",                    group: "Workflow",      label: "Conversation Tags",   icon: TagIcon,       Component: TagsSettings },
-  { value: "replies",                 group: "Workflow",      label: "Quick Replies",       icon: MessageSquare, Component: QuickRepliesSettings },
+  { value: "replies",                 group: "Workflow",      label: "Speed Messages",      icon: MessageSquare, Component: SpeedMessagesSettings },
   { value: "distribution",            group: "Workflow",      label: "Chat Distribution",   icon: Sliders,       Component: ChatDistributionSettings },
+  { value: "customer-fields",         group: "Workflow",      label: "Customer Fields",     icon: ListPlus,      Component: CustomerFieldsSettings },
   { value: "chat-reason-categories",  group: "Reasons",       label: "Reason Categories",   icon: FolderOpen,    Component: ChatReasonCategoriesSettings },
   { value: "chat-reasons",            group: "Workflow",      label: "Chat Topics",         icon: MessageCircle, Component: TopicsSettings },
   { value: "not-ready",               group: "Reasons",       label: "Not Ready Reasons",   icon: Coffee,        Component: NotReadyReasonsSettings },
-  { value: "whatsapp",                group: "Workflow",      label: "WhatsApp",            icon: Smartphone,    Component: WhatsAppSettings },
+  { value: "channels",                group: "Channels",      label: "Channels",            icon: Radio,         Component: ChannelsSettings },
+  { value: "whatsapp",                group: "Channels",      label: "WhatsApp diagnostics", icon: Smartphone,   Component: WhatsAppSettings },
+  { value: "templates",               group: "Channels",      label: "WhatsApp Templates",  icon: FileText,      Component: TemplatesSettings },
   { value: "branding",                group: "Appearance",    label: "Branding",            icon: Palette,       Component: BrandingSettings },
   { value: "activity",                group: "Security",      label: "Activity Log",        icon: History,       Component: ActivityLogSettings },
 ];
 
-const SETTINGS_GROUPS = ["Team", "Workflow", "Reasons", "Appearance", "Security"] as const;
+const SETTINGS_GROUPS = ["Team", "Workflow", "Reasons", "Channels", "Appearance", "Security"] as const;
 
 export default function SettingsPage() {
   const [active, setActive] = React.useState<string>("users");
@@ -351,89 +359,6 @@ function TagsSettings() {
 // -----------------------------------------------------------------------------
 // QUICK REPLIES
 // -----------------------------------------------------------------------------
-const createReplySchema = z.object({
-  title: z.string().min(2),
-  body: z.string().min(5),
-});
-
-function QuickRepliesSettings() {
-  const { data: replies, isLoading } = useListQuickReplies();
-  const createMut = useCreateQuickReply();
-  const deleteMut = useDeleteQuickReply();
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  const form = useForm<z.infer<typeof createReplySchema>>({
-    resolver: zodResolver(createReplySchema),
-    defaultValues: { title: "", body: "" }
-  });
-
-  const onSubmit = (values: z.infer<typeof createReplySchema>) => {
-    createMut.mutate({ data: values }, {
-      onSuccess: () => {
-        toast({ title: "Template created" });
-        queryClient.invalidateQueries({ queryKey: getListQuickRepliesQueryKey() });
-        form.reset();
-      }
-    });
-  };
-
-  const handleDelete = (id: number) => {
-    deleteMut.mutate({ id }, {
-      onSuccess: () => queryClient.invalidateQueries({ queryKey: getListQuickRepliesQueryKey() })
-    });
-  };
-
-  return (
-    <div className="grid md:grid-cols-3 gap-6">
-      <div className="md:col-span-2 space-y-4">
-        {isLoading ? <Skeleton className="h-24 w-full" /> : replies?.map((qr) => (
-          <Card key={qr.id} className="shadow-sm">
-            <CardHeader className="py-4 pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-semibold">{qr.title}</CardTitle>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(qr.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </CardHeader>
-            <CardContent className="py-4 pt-0 text-sm text-muted-foreground">
-              {qr.body}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="shadow-sm h-fit">
-        <CardHeader>
-          <CardTitle className="text-base">New Template</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField control={form.control} name="title" render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-xs">Short Title</FormLabel>
-                  <FormControl><Input className="h-9 text-sm" placeholder="e.g. Greeting" {...field} /></FormControl>
-                </FormItem>
-              )}/>
-              <FormField control={form.control} name="body" render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-xs">Message Body</FormLabel>
-                  <FormControl>
-                    <Textarea className="min-h-[100px] text-sm resize-none" placeholder="Hello, how can I help you today?" {...field} />
-                  </FormControl>
-                </FormItem>
-              )}/>
-              <Button type="submit" className="w-full" size="sm" disabled={createMut.isPending}>
-                Save Template
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 // -----------------------------------------------------------------------------
 // CHAT DISTRIBUTION
 // -----------------------------------------------------------------------------

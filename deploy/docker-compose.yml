@@ -47,6 +47,13 @@ services:
       WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v22.0}
       # Emergency stop: set to "false" to stop ALL sending to customers.
       WHATSAPP_SENDING_ENABLED: ${WHATSAPP_SENDING_ENABLED:-true}
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
+      # Facebook Messenger & Instagram Direct (off while the tokens are empty)
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
+      MESSENGER_PAGE_ACCESS_TOKEN: ${MESSENGER_PAGE_ACCESS_TOKEN:-}
+      INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN:-}
+      INSTAGRAM_GRAPH_HOST: ${INSTAGRAM_GRAPH_HOST:-}
     networks:
       - lotus_net
 

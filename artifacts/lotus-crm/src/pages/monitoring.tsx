@@ -20,6 +20,7 @@ import {
   useMonitoring,
   useMyPermissions,
   useTakeover,
+  useTeams,
   type MonitoringRow,
   type MonitoringView,
 } from "@/lib/api-extra";
@@ -59,6 +60,8 @@ export default function MonitoringPage() {
   const [view, setView] = useState<MonitoringView>("active");
   const [agentId, setAgentId] = useState<number | undefined>();
   const [channel, setChannel] = useState("all");
+  const [teamId, setTeamId] = useState("all");
+  const { data: teams } = useTeams();
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -66,6 +69,7 @@ export default function MonitoringPage() {
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useMonitoring(view, {
     agentId,
     channel: channel === "all" ? undefined : channel,
+    teamId: teamId === "all" ? undefined : Number(teamId),
   });
   const takeover = useTakeover();
   const bulk = useBulkConversations();
@@ -96,9 +100,11 @@ export default function MonitoringPage() {
     });
   const assign = (row: MonitoringRow, to: string) =>
     bulk.mutate(
-      { ids: [row.id], action: "assign", value: to === "queue" ? null : Number(to) },
+      to.startsWith("team:")
+        ? { ids: [row.id], action: "team", value: Number(to.slice(5)) }
+        : { ids: [row.id], action: "assign", value: to === "queue" ? null : Number(to) },
       {
-        onSuccess: () => { toast({ title: to === "queue" ? "Returned to the queue" : "Chat assigned" }); void refetch(); },
+        onSuccess: () => { toast({ title: to === "queue" ? "Returned to the queue" : to.startsWith("team:") ? "Transferred to the team" : "Chat assigned" }); void refetch(); },
         onError: (e) => toast({ title: "Could not assign", description: (e as { data?: { error?: string } }).data?.error, variant: "destructive" }),
       },
     );
@@ -177,6 +183,15 @@ export default function MonitoringPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm text-muted-foreground flex-1 min-w-[200px]">{current.hint}</p>
+        {(teams?.length ?? 0) > 0 && (
+          <Select value={teamId} onValueChange={(v) => { setTeamId(v); setAgentId(undefined); }}>
+            <SelectTrigger className="w-40 h-9" aria-label="Team" data-testid="monitor-team"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All teams</SelectItem>
+              {teams!.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={channel} onValueChange={setChannel}>
           <SelectTrigger className="w-40 h-9" aria-label="Channel"><SelectValue /></SelectTrigger>
           <SelectContent>{CHANNELS.map((c) => <SelectItem key={c.v} value={c.v}>{c.l}</SelectItem>)}</SelectContent>
@@ -216,6 +231,7 @@ export default function MonitoringPage() {
                 ) : (
                   <span className="text-warning font-medium">Unassigned</span>
                 )}
+                {c.team_name && <Badge variant="secondary" className="font-normal">{c.team_name}</Badge>}
                 {c.takeover_from_agent_id && (
                   <Badge className="bg-whisper/15 text-whisper border-whisper/30" variant="outline">Taken over from {c.takeover_from_name}</Badge>
                 )}
@@ -240,6 +256,9 @@ export default function MonitoringPage() {
                     <SelectItem value="queue"><Inbox className="inline h-3 w-3 mr-1" />Back to queue</SelectItem>
                     {assignable.filter((a) => a.id !== c.assigned_agent_id).map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>{a.name} ({a.open_chats})</SelectItem>
+                    ))}
+                    {(teams ?? []).filter((t) => t.id !== c.team_id).map((t) => (
+                      <SelectItem key={`t${t.id}`} value={`team:${t.id}`}>Team: {t.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
