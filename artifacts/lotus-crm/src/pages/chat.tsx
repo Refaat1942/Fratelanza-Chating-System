@@ -8,7 +8,6 @@ import {
   useAssignConversation,
   useListUsers,
   useListTags,
-  useListQuickReplies,
   getListConversationsQueryKey,
   getGetConversationQueryKey,
 } from "@workspace/api-client-react";
@@ -75,7 +74,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { FaWhatsapp, FaFacebookMessenger, FaInstagram, FaSms } from "react-icons/fa";
 import { useLocation, useSearch } from "wouter";
-import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, useTakeover, useReleaseTakeover, useTeams, type BulkAction } from "@/lib/api-extra";
+import { useInsights, useChatReasons, useUploadAttachment, useMyPermissions, useSystemStatus, useBulkConversations, useWorkload, useTakeover, useReleaseTakeover, useTeams, useSpeedMessages, useSpeedCategories, useBranding, recordSpeedUse, type BulkAction, type SpeedMessage } from "@/lib/api-extra";
+import { fillVariables } from "@/lib/speed";
+import { SpeedDialog } from "@/pages/settings-speed";
 import { WhisperPanel } from "@/components/whisper-panel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useThread, markConversationRead } from "@/lib/inbox";
@@ -781,6 +782,32 @@ function ChatCenter({
   useConversationSocket(conversationId, onSocketMessage, handleTyping, currentUserName);
   const emitTyping = useTypingEmit(conversationId, currentUserName);
 
+  // "/shortcut" in the composer → speed-message suggestions.
+  const { data: speed } = useSpeedMessages();
+  const { data: brandingInfo } = useBranding();
+  const slash = /^\/(\S*)$/.exec(message);
+  const slashMatches = useMemo(() => {
+    if (!slash) return [];
+    const q = slash[1].toLowerCase();
+    return (speed ?? [])
+      .filter((r) => (r.shortcut ?? "").startsWith(q) || r.title.toLowerCase().includes(q))
+      .sort((a, b) => Number(!(a.shortcut ?? "").startsWith(q)) - Number(!(b.shortcut ?? "").startsWith(q)) || b.usageCount - a.usageCount)
+      .slice(0, 6);
+  }, [slash?.[1], speed]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [slashIdx, setSlashIdx] = useState(0);
+  const pickSpeed = (r: SpeedMessage) => {
+    recordSpeedUse(r.id);
+    setMessage(fillVariables(r.body, {
+      customerName: conv?.customer?.name,
+      phone: conv?.customer?.phone,
+      agentName: currentUserName,
+      company: brandingInfo?.companyName,
+      customFields: (conv?.customer as { customFields?: Record<string, string> | null } | undefined)?.customFields,
+    }));
+    setSlashIdx(0);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
   const sendMessageMut = useSendMessage();
   const resolveMut = useResolveConversation();
   const assignMut = useAssignConversation();
@@ -904,6 +931,12 @@ function ChatCenter({
 
   const coarsePointer = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (slashMatches.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashMatches.length); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setSlashIdx((i) => (i - 1 + slashMatches.length) % slashMatches.length); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickSpeed(slashMatches[Math.min(slashIdx, slashMatches.length - 1)]); return; }
+      if (e.key === "Escape") { e.preventDefault(); setMessage(""); return; }
+    }
     // Phones: Enter = new line (use the Send button). Desktop: Enter sends.
     if (e.key === "Enter" && !e.shiftKey && !coarsePointer) {
       e.preventDefault();
@@ -1231,6 +1264,23 @@ function ChatCenter({
                 )}
               </div>
             )}
+            {slashMatches.length > 0 && (
+              <ul role="listbox" aria-label="Speed messages" className="border-b border-border max-h-56 overflow-y-auto" data-testid="slash-suggestions">
+                {slashMatches.map((r, i) => (
+                  <li key={r.id} role="option" aria-selected={i === slashIdx}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); pickSpeed(r); }}
+                      className={cn("w-full text-left px-3 py-1.5 text-sm flex gap-2 items-baseline", i === slashIdx ? "bg-primary/10" : "hover:bg-muted")}
+                    >
+                      {r.shortcut && <code className="text-xs text-primary shrink-0">/{r.shortcut}</code>}
+                      <span className="font-medium shrink-0">{r.title}</span>
+                      <span className="text-xs text-muted-foreground truncate" dir="auto">{r.body}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <Textarea
               ref={textareaRef}
               value={message}
@@ -1293,8 +1343,12 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const { data: conv } = useGetConversation(conversationId, {
     query: { enabled: !!conversationId, queryKey: getGetConversationQueryKey(conversationId) }
   });
-  const { data: quickReplies } = useListQuickReplies();
+  const { data: quickReplies } = useSpeedMessages();
+  const { data: speedCats } = useSpeedCategories();
+  const { data: branding } = useBranding();
   const [replySearch, setReplySearch] = useState("");
+  const [replyCat, setReplyCat] = useState("all");
+  const [newReply, setNewReply] = useState(false);
   const { data: users } = useListUsers();
   const { data: me } = useGetMe();
   const { data: workload } = useWorkload(me?.role === "admin" || me?.role === "supervisor");
@@ -1303,10 +1357,21 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
   const customer = conv?.customer;
 
   const filteredReplies = (quickReplies ?? []).filter((qr) => {
+    if (replyCat !== "all" && String(qr.categoryId ?? "none") !== replyCat) return false;
     if (!replySearch.trim()) return true;
-    const q = replySearch.toLowerCase();
-    return qr.title.toLowerCase().includes(q) || qr.body.toLowerCase().includes(q);
+    const q = replySearch.toLowerCase().replace(/^\//, "");
+    return qr.title.toLowerCase().includes(q) || qr.body.toLowerCase().includes(q) || (qr.shortcut ?? "").includes(q);
   });
+  const applyReply = (qr: SpeedMessage) => {
+    recordSpeedUse(qr.id);
+    onInsertReply(fillVariables(qr.body, {
+      customerName: customer?.name,
+      phone: customer?.phone,
+      agentName: me ? userLabel(me as AppUser) : "",
+      company: branding?.companyName,
+      customFields: (customer as { customFields?: Record<string, string> | null } | undefined)?.customFields,
+    }));
+  };
 
   const patchMut = usePatchConversation();
 
@@ -1563,6 +1628,20 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
                 data-testid="input-quick-reply-search"
               />
             </div>
+            <button type="button" onClick={() => setNewReply(true)} className="mt-2 text-xs text-primary hover:underline inline-flex items-center gap-1" data-testid="btn-new-personal-reply">
+              <Plus className="h-3 w-3" /> New reply
+            </button>
+            {newReply && <SpeedDialog row={null} onClose={() => setNewReply(false)} />}
+            {(speedCats ?? []).length > 0 && (
+              <div className="flex gap-1 overflow-x-auto mt-2 pb-0.5">
+                {[{ id: "all", name: "All" }, ...(speedCats ?? []).map((c) => ({ id: String(c.id), name: c.name }))].map((c) => (
+                  <button key={c.id} type="button" onClick={() => setReplyCat(c.id)}
+                    className={cn("shrink-0 rounded-full border px-2.5 py-0.5 text-[11px]", replyCat === c.id ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-muted")}>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <ScrollArea className="flex-1 min-h-0 [&_[data-radix-scroll-area-viewport]>div]:!block">
             <div className="p-4 space-y-3">
@@ -1570,11 +1649,15 @@ function ChatContextPanel({ conversationId, onInsertReply }: { conversationId: n
                 <button
                   key={qr.id}
                   type="button"
-                  onClick={() => onInsertReply(qr.body)}
+                  onClick={() => applyReply(qr)}
                   className="w-full text-left p-3 border border-border rounded-lg bg-card hover:border-primary/50 hover:bg-primary/5 cursor-pointer transition-colors group focus:outline-none focus:ring-2 focus:ring-ring"
                   data-testid={`btn-quick-reply-${qr.id}`}
                 >
-                  <h5 className="font-medium text-sm mb-1">{qr.title}</h5>
+                  <h5 className="font-medium text-sm mb-1 flex items-center gap-1.5">
+                    <span className="truncate">{qr.title}</span>
+                    {qr.shortcut && <code className="text-[10px] text-primary">/{qr.shortcut}</code>}
+                    {qr.categoryName && <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{qr.categoryName}</span>}
+                  </h5>
                   <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">{qr.body}</p>
                   <span className="block w-full mt-2 h-7 leading-7 text-xs opacity-0 group-hover:opacity-100 transition-opacity text-primary text-center font-medium">
                     Click to insert

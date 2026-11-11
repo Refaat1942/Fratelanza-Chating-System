@@ -837,3 +837,70 @@ export function useDeleteTeam() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/teams"] }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Speed messages (quick replies v2)
+// ---------------------------------------------------------------------------
+export interface SpeedMessage {
+  id: number;
+  title: string;
+  body: string;
+  categoryId: number | null;
+  categoryName: string | null;
+  shortcut: string | null;
+  visibility: "all" | "team" | "user";
+  teamId: number | null;
+  teamName: string | null;
+  ownerId: number | null;
+  ownerName: string | null;
+  language: "en" | "ar" | null;
+  usageCount: number;
+  lastUsedAt: string | null;
+}
+export interface SpeedCategory { id: number; name: string; sortOrder: number }
+
+export function useSpeedMessages(manage = false) {
+  return useQuery({
+    queryKey: ["/api/quick-replies", manage ? "manage" : "mine"],
+    queryFn: () => customFetch<SpeedMessage[]>(`/api/quick-replies${manage ? "?scope=manage" : ""}`),
+    staleTime: 30_000,
+  });
+}
+
+export function useSpeedCategories() {
+  return useQuery({ queryKey: ["/api/quick-reply-categories"], queryFn: () => customFetch<SpeedCategory[]>("/api/quick-reply-categories"), staleTime: 60_000 });
+}
+
+export function useSaveSpeedMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id?: number; data: Partial<SpeedMessage> }) =>
+      customFetch<SpeedMessage>(id ? `/api/quick-replies/${id}` : "/api/quick-replies", { method: id ? "PUT" : "POST", body: JSON.stringify(data) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/quick-replies"] }),
+  });
+}
+
+export function useDeleteSpeedMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => customFetch(`/api/quick-replies/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/quick-replies"] }),
+  });
+}
+
+export function useSpeedCategoryMutations() {
+  const qc = useQueryClient();
+  const done = () => {
+    void qc.invalidateQueries({ queryKey: ["/api/quick-reply-categories"] });
+    void qc.invalidateQueries({ queryKey: ["/api/quick-replies"] });
+  };
+  return {
+    create: useMutation({ mutationFn: (name: string) => customFetch("/api/quick-reply-categories", { method: "POST", body: JSON.stringify({ name }) }), onSuccess: done }),
+    remove: useMutation({ mutationFn: (id: number) => customFetch(`/api/quick-reply-categories/${id}`, { method: "DELETE" }), onSuccess: done }),
+  };
+}
+
+/** Fire-and-forget usage count for analytics. */
+export function recordSpeedUse(id: number) {
+  void customFetch(`/api/quick-replies/${id}/use`, { method: "POST", body: "{}" }).catch(() => undefined);
+}
